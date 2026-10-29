@@ -115,7 +115,7 @@ This creates:
 | `guideline_rules` | The rules: text, severity, guidance, product types, requirement ids, status (`proposed`/`active`/`retired`), version |
 | `analyses` | One row per analysis: request, status, result, error, callback URL, n8n execution id |
 
-It also inserts nine **illustrative** rules so you can test straight away. Replace them with approved rules (step 7).
+No rules yet: step 6 loads the illustrative rule set together with the knowledge base.
 
 If you ran the old prototype's schema in this database, drop its `kb_chunks` and `guideline_rules` first; the columns differ.
 
@@ -206,7 +206,15 @@ curl -s -o /dev/null -w '%{http_code}\n' "$N8N/ai/rules"     # 403: the key is r
 
 ## Step 6. Feed the knowledge base
 
-Upload each guideline, template or reference document once. Use a stable `sourceKey`: uploading the same key again **replaces** the document and all its chunks, which is how you load a new version.
+**Quick start with the illustrative set.** `knowledge-base/` holds 11 illustrative documents (8 guidelines, one per area, and 3 templates) and `rules/rfda-rules.json` holds 29 rules written to match them, covering every product type. They are for testing only, not official Rwanda FDA text. Load both in one go:
+
+```bash
+N8N=http://localhost:5678/webhook KEY=<API key> ai-review/tools/load-knowledge-base.sh
+```
+
+It uploads every document in `knowledge-base/manifest.json`, saves the rules, and retires any active rule that is not in the file. Run it again after editing the rules file. To regenerate the PDFs after editing their text: `python3 ai-review/tools/make_knowledge_base.py`.
+
+**Your own documents.** Upload each guideline, template or reference document once. Use a stable `sourceKey`: uploading the same key again **replaces** the document and all its chunks, which is how you load a new version.
 
 ```bash
 curl -s -H "X-API-Key: $KEY" $N8N/ai/kb/documents \
@@ -401,7 +409,11 @@ How to read it:
 
 ## Step 9. Connect the portal
 
-What the NestJS API needs, as a new `ai` module (`rfda-portal/apps/api/src/ai`):
+**This is already built** in `rfda-portal` (module `apps/api/src/ai`, component `apps/web/components/AiReview.tsx`):
+- **Assessors** get an **AI review** tab and a summary with a **Request AI analysis** button in the review workspace (screening and assessment). Each finding has an **Add to query** button.
+- **Applicants** get an optional **AI pre-check** in the last step of the application form, while they can still change the application (draft, awaiting payment, answering a query). They see only their own checks, never the assessors' reviews. They may run at most `AI_APPLICANT_DAILY_LIMIT` checks (default 5) per application per day.
+
+The rest of this step documents how it is wired, for reference. What the NestJS API needs, as an `ai` module:
 
 1. **Settings** in `apps/api/.env`:
    ```
@@ -409,6 +421,7 @@ What the NestJS API needs, as a new `ai` module (`rfda-portal/apps/api/src/ai`):
    AI_API_KEY=<API key>
    AI_CALLBACK_KEY=<callback key>
    AI_CALLBACK_URL=http://<portal-api-host>:4100/ai/callback
+   AI_APPLICANT_DAILY_LIMIT=5
    ```
    n8n runs in Docker, so `localhost` in the callback URL would mean the n8n container itself. Use `http://host.docker.internal:4100/ai/callback` when the portal runs on the same Mac, or the portal API's internal hostname on a server.
 2. **Table** `AiAnalysis` (id, applicationId, n8n analysisId, status, verdict, result JSON, requestedBy, createdAt, finishedAt).
@@ -455,7 +468,7 @@ SELECT id, application_ref, created_at FROM analyses WHERE status = 'running' AN
 - **The data.** Analyses contain dossier content. Back up the `aipoc` database along with the portal's.
 - **The LLM.** If you ever replace Ollama with a hosted model, dossier text leaves your server. Check that against Rwanda's data protection law (Law No 058/2021) and your contracts first.
 
-**Change the code.** The JavaScript in the Code nodes is kept in `src/` and assembled into `workflows/` by `python3 tools/build_workflows.py`. Edit `src/`, rebuild, re-import. If you edit nodes in the n8n editor instead, export the workflow back to `workflows/` so the files stay the source of truth.
+**Change the code.** The JavaScript in the Code nodes is kept in `src/` and assembled into `workflows/` by `python3 tools/build_workflows.py`. Edit `src/`, then run `ai-review/tools/deploy-workflows.sh` (or name workflows: `… 04-analyze`). It rebuilds, imports, publishes and then restarts n8n. The restart must come after publishing: until then n8n keeps running the previous version, which in testing caused a re-run to use old code. If you edit nodes in the n8n editor instead, export the workflow back to `workflows/` so the files stay the source of truth.
 
 ---
 

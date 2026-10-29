@@ -42,6 +42,25 @@ verification (confirm payment) → screening (persisted document checklist, acce
 
 The API enforces every rule the UI shows: completeness on submit, allowed decisions per stage, required comments, that every uploaded document is ticked before acceptance, ownership of applications and files.
 
+## AI review
+
+Assessors can ask for an AI review of an application, and applicants can run an AI pre-check before they submit. Both call the n8n service in `../ai-review` (setup: `../ai-review/GUIDE.md`) and are configured by the `AI_*` settings in `apps/api/.env`. Leave `AI_N8N_URL` empty to turn the feature off. Findings are advice only; every one shows its quoted evidence.
+
+The demo data (`pnpm db:seed`) has realistic document contents (marked as demo documents), so the AI has something to check. Some applications are clean, others have planted problems:
+
+| Application | Who checks it | Planted problems |
+|---|---|---|
+| RFDA26/HM/0181 Metfo-AK (reliance, approval stage) | Assessor | None: should pass |
+| RFDA25/HM/0988 Amoxi-IP (registered) | (none) | None |
+| RFDA26/PF/0013 Smocha (assessment) | Assessor | None |
+| RFDA26/PF/0009 Umuco Juice (screening) | Assessor | None |
+| RFDA26/CO/0041 Aloe Kivu (awaiting payment) | Applicant pre-check | None |
+| RFDA26/HM/0207 Paracet-IP (reliance, query to answer) | Applicant pre-check | GMP certificate expired; authorization letter doesn't allow information sharing; label has no storage temperature or manufacturer address |
+| DRAFT-5821 Olive Vitality (draft) | Applicant pre-check | Label: no temperature, expiry, net content or manufacturer; whey (milk) allergen not declared |
+| RFDA26/PF/0015 Gorilla Grain (payment verification) | Assessor | Food safety certificate expired; label has no expiry date or batch |
+| RFDA26/CO/0038 Nyungwe Shea (screening) | Assessor | Ingredient list without percentages; safety assessment unsigned; label without ingredients |
+| RFDA26/MD/0022 GlucoCheck (assessment) | Assessor | Declaration of conformity without risk class; instructions for use without storage conditions |
+
 ## Document requirements
 
 Defined in one place: `packages/shared/src/reference.ts` (`COMMON_DOCS`, `TYPE_DOCS`). Each requirement has a group, a required flag, an optional condition and whether several files may be uploaded.
@@ -69,7 +88,6 @@ Uploads are stored on disk under `apps/api/uploads` (`UPLOAD_DIR`) with random n
 ## Not done yet
 
 - Mobile money is a placeholder that records a reference; no gateway is connected.
-- The AI pre-check and AI assist panels are placeholders. The n8n prototype in `../n8n-poc` is the intended backend.
 - No email notifications, password reset, renewals, or the other services (premises, import permits, etc.).
 - One assessor role does every stage; there are no separate verifier/screener/approver roles yet.
 - Fees, timelines, SLAs and most product lists are the prototype's illustrative values.

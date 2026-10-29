@@ -1,6 +1,18 @@
 const prompts = $('Build prompts').all().map((i) => i.json);
-const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+// Quotes are compared on words and numbers only, so "80.00-125.00%" matches "80.00-125.00", and the date
+// marks added in "Build prompts" are ignored. A quote must still appear in the excerpt word for word.
+const norm = (s) => String(s || '').replace(/\s*\[(before|after|same day as) the analysis date\]/gi, '')
+  .toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim();
 const STATUSES = ['pass', 'fail', 'unclear', 'not_applicable'];
+// A quote may skip words with "..." or "…"; every part must then appear in the excerpt, in order.
+function quoteFound(quote, text) {
+  const t = norm(text);
+  let from = 0;
+  const parts = String(quote || '').split(/\.{3}|…/).map(norm).filter(Boolean);
+  if (!parts.length) return false;
+  for (const p of parts) { const at = t.indexOf(p, from); if (at < 0) return false; from = at + p.length; }
+  return true;
+}
 
 let tokens = 0;
 const findings = $input.all().map((item, i) => {
@@ -18,7 +30,7 @@ const findings = $input.all().map((item, i) => {
   const evidence = (r.evidence || []).map((ev) => {
     const src = byId[ev.chunkId];
     return { chunkId: ev.chunkId, requirementId: src ? src.requirementId : null, document: src ? src.file : null, page: src ? src.page : null,
-      quote: ev.quote, verified: !!src && !!norm(ev.quote) && norm(src.text).includes(norm(ev.quote)) };
+      quote: ev.quote, verified: !!src && quoteFound(ev.quote, src.text) };
   });
   const notes = [];
   let status = r.status;

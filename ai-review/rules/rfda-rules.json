@@ -1,0 +1,357 @@
+{
+  "note": "ILLUSTRATIVE rules for testing, written to match knowledge-base/. Replace with approved Rwanda FDA rules.",
+  "rules": [
+    {
+      "code": "APP-002",
+      "text": "The application form states the storage conditions with a temperature, and the shelf life.",
+      "severity": "major",
+      "productTypes": [],
+      "requirementIds": [
+        "application-form"
+      ],
+      "status": "active",
+      "guidance": "\"Store below 30°C\" with a shelf life in months is acceptable; a storage statement without a temperature is not."
+    },
+    {
+      "code": "ADM-001",
+      "text": "The cover letter identifies the product and is signed and dated by a named responsible person of the applicant.",
+      "severity": "minor",
+      "productTypes": [],
+      "requirementIds": [
+        "cover"
+      ],
+      "status": "active",
+      "guidance": "Fail if the signature, the name of the signatory or the date is missing."
+    },
+    {
+      "code": "ADM-002",
+      "text": "The power of attorney names the local technical representative, authorizes it to act before Rwanda FDA, and is notarized.",
+      "severity": "major",
+      "productTypes": [],
+      "requirementIds": [
+        "poa"
+      ],
+      "status": "active",
+      "guidance": "Fail if there is no notarization."
+    },
+    {
+      "code": "LBL-001",
+      "text": "The label states the storage conditions, including a temperature.",
+      "severity": "major",
+      "productTypes": [],
+      "requirementIds": [
+        "artwork"
+      ],
+      "status": "active",
+      "guidance": "\"Store below 30°C\" is acceptable; \"store in a cool, dry place\" on its own is not."
+    },
+    {
+      "code": "LBL-002",
+      "text": "The label shows the expiry date or its format (e.g. EXP: MM/YYYY) and the batch number.",
+      "severity": "major",
+      "productTypes": [],
+      "requirementIds": [
+        "artwork"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "LBL-003",
+      "text": "The storage conditions on the label match the storage conditions in the application form.",
+      "severity": "major",
+      "productTypes": [],
+      "requirementIds": [
+        "application-form",
+        "artwork"
+      ],
+      "status": "active",
+      "guidance": "Compare the temperatures. A label without a temperature does not match."
+    },
+    {
+      "code": "LBL-004",
+      "text": "The label states the name and full address of the manufacturer, including the country.",
+      "severity": "minor",
+      "productTypes": [],
+      "requirementIds": [
+        "artwork"
+      ],
+      "status": "active",
+      "guidance": "A company name without an address is not enough."
+    },
+    {
+      "code": "APP-001",
+      "text": "The application states the product name, strength and dosage form.",
+      "severity": "major",
+      "productTypes": [
+        "HM",
+        "VM"
+      ],
+      "requirementIds": [
+        "application-form"
+      ],
+      "status": "active",
+      "guidance": "All three must be present, e.g. \"Paracetamol 500 mg tablets\"."
+    },
+    {
+      "code": "REL-001",
+      "text": "The declaration of sameness declares that the product is identical to the approved product in formulation, manufacturing site, manufacturing process, specifications and packaging.",
+      "severity": "critical",
+      "productTypes": [
+        "HM"
+      ],
+      "requirementIds": [
+        "sameness"
+      ],
+      "status": "active",
+      "guidance": "All five elements must be covered by the declaration."
+    },
+    {
+      "code": "REL-002",
+      "text": "The declaration of sameness names the reference regulatory authority, the registration number with that authority, and the manufacturing site.",
+      "severity": "major",
+      "productTypes": [
+        "HM"
+      ],
+      "requirementIds": [
+        "sameness"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "REL-003",
+      "text": "The GMP certificate is issued by the reference regulatory authority, names the manufacturing site, and is valid on the analysis date.",
+      "severity": "critical",
+      "productTypes": [
+        "HM"
+      ],
+      "requirementIds": [
+        "rra-gmp"
+      ],
+      "status": "active",
+      "guidance": "Compare the certificate's expiry date with the analysis date. An expired certificate is a fail."
+    },
+    {
+      "code": "REL-004",
+      "text": "The letter authorizes the reference regulatory authority to share its assessment and inspection reports about the product with Rwanda FDA.",
+      "severity": "major",
+      "productTypes": [
+        "HM"
+      ],
+      "requirementIds": [
+        "rra-auth"
+      ],
+      "status": "active",
+      "guidance": "A letter that only confirms the approval, without authorizing information sharing with Rwanda FDA, is a fail."
+    },
+    {
+      "code": "CTD-001",
+      "text": "Module 1 includes the summary of product characteristics (SmPC) and the patient information leaflet.",
+      "severity": "major",
+      "productTypes": [
+        "HM"
+      ],
+      "requirementIds": [
+        "m1"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "CTD-003",
+      "text": "Module 3 includes long-term stability data covering at least the proposed shelf life.",
+      "severity": "major",
+      "productTypes": [
+        "HM"
+      ],
+      "requirementIds": [
+        "m3"
+      ],
+      "status": "active",
+      "guidance": "Compare the months of long-term data with the shelf life. Less data than the shelf life is a fail unless an extrapolation is justified."
+    },
+    {
+      "code": "CTD-005",
+      "text": "Module 5 includes a bioequivalence study with 90% confidence intervals for AUC and Cmax within 80.00-125.00%.",
+      "severity": "major",
+      "productTypes": [
+        "HM"
+      ],
+      "requirementIds": [
+        "m5"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "VM-001",
+      "text": "The label states the withdrawal period for meat, milk and eggs, or states that the product is not for food-producing animals.",
+      "severity": "critical",
+      "productTypes": [
+        "VM"
+      ],
+      "requirementIds": [
+        "artwork"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "FOOD-001",
+      "text": "The food safety certificate (HACCP, ISO 22000 or FSSC 22000) names the manufacturing site and is valid on the analysis date.",
+      "severity": "critical",
+      "productTypes": [
+        "PF"
+      ],
+      "requirementIds": [
+        "fsc"
+      ],
+      "status": "active",
+      "guidance": "Compare the certificate's expiry date with the analysis date."
+    },
+    {
+      "code": "FOOD-002",
+      "text": "The certificate of analysis shows the batch number and microbiological results against specification limits.",
+      "severity": "major",
+      "productTypes": [
+        "PF"
+      ],
+      "requirementIds": [
+        "coa"
+      ],
+      "status": "active",
+      "guidance": "Fail if there are no microbiological tests."
+    },
+    {
+      "code": "FOOD-003",
+      "text": "The composition lists every ingredient with its quantity or percentage.",
+      "severity": "major",
+      "productTypes": [
+        "PF"
+      ],
+      "requirementIds": [
+        "comp"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "FOOD-004",
+      "text": "The label lists the ingredients and declares the allergens.",
+      "severity": "major",
+      "productTypes": [
+        "PF"
+      ],
+      "requirementIds": [
+        "artwork"
+      ],
+      "status": "active",
+      "guidance": "Allergens such as milk, soy, wheat (gluten), eggs, peanuts and tree nuts must be declared if present."
+    },
+    {
+      "code": "FOOD-005",
+      "text": "The label states the net content.",
+      "severity": "minor",
+      "productTypes": [
+        "PF"
+      ],
+      "requirementIds": [
+        "artwork"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "COS-001",
+      "text": "The cosmetics GMP certificate (ISO 22716 or equivalent) names the manufacturing site and is valid on the analysis date.",
+      "severity": "critical",
+      "productTypes": [
+        "CO"
+      ],
+      "requirementIds": [
+        "gmp"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "COS-002",
+      "text": "The ingredient list gives every ingredient by its INCI name with its percentage.",
+      "severity": "major",
+      "productTypes": [
+        "CO"
+      ],
+      "requirementIds": [
+        "inci"
+      ],
+      "status": "active",
+      "guidance": "A list of names without percentages is a fail."
+    },
+    {
+      "code": "COS-003",
+      "text": "The product safety assessment is signed and dated by a named, qualified safety assessor.",
+      "severity": "major",
+      "productTypes": [
+        "CO"
+      ],
+      "requirementIds": [
+        "safety"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "COS-004",
+      "text": "The label lists the ingredients by INCI name.",
+      "severity": "major",
+      "productTypes": [
+        "CO"
+      ],
+      "requirementIds": [
+        "artwork"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "MD-001",
+      "text": "The ISO 13485 certificate covers the device's design and manufacture and is valid on the analysis date.",
+      "severity": "critical",
+      "productTypes": [
+        "MD"
+      ],
+      "requirementIds": [
+        "iso"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "MD-002",
+      "text": "The declaration of conformity names the device and model, states its risk class, and lists the standards applied.",
+      "severity": "major",
+      "productTypes": [
+        "MD"
+      ],
+      "requirementIds": [
+        "doc"
+      ],
+      "status": "active",
+      "guidance": "Fail if the risk class is missing."
+    },
+    {
+      "code": "MD-003",
+      "text": "The technical file summary includes risk management according to ISO 14971.",
+      "severity": "major",
+      "productTypes": [
+        "MD"
+      ],
+      "requirementIds": [
+        "tech"
+      ],
+      "status": "active"
+    },
+    {
+      "code": "MD-004",
+      "text": "The instructions for use state the intended use and the storage conditions with temperature limits.",
+      "severity": "major",
+      "productTypes": [
+        "MD"
+      ],
+      "requirementIds": [
+        "ifu"
+      ],
+      "status": "active"
+    }
+  ]
+}

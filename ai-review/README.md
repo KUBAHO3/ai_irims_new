@@ -13,4 +13,8 @@ Checks Rwanda FDA application documents against approved rules, using a knowledg
 | `tools/build_workflows.py` | Rebuilds `workflows/` from `src/` |
 | `tools/try-samples.sh` | Loads the samples and runs one analysis end to end |
 | `setup/credentials.example.json` | Template for importing the three n8n credentials |
-| `samples/` | Illustrative guidelines, template and a small submission (not official documents) |
+| `knowledge-base/` | 11 illustrative guidelines and templates as PDFs, with `manifest.json` (not official documents) |
+| `rules/rfda-rules.json` | 29 illustrative rules matching the knowledge base, for every product type |
+| `tools/make_knowledge_base.py` | Regenerates the knowledge-base PDFs |
+| `tools/load-knowledge-base.sh` | Uploads the knowledge base and loads the rules |
+| `samples/` | A small sample submission used by `tools/try-samples.sh` |

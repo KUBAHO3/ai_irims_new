@@ -1,0 +1,165 @@
+[
+  {
+    "sourceKey": "rfda-guide-labelling",
+    "title": "Guidelines on labelling of regulated products",
+    "kind": "guideline",
+    "productTypes": [],
+    "requirementIds": [
+      "artwork"
+    ],
+    "version": "2026-01",
+    "file": "rfda-guide-labelling.pdf"
+  },
+  {
+    "sourceKey": "rfda-guide-administrative",
+    "title": "Guidelines on administrative documents for product registration",
+    "kind": "guideline",
+    "productTypes": [],
+    "requirementIds": [
+      "cover",
+      "poa",
+      "ltrletter",
+      "tm",
+      "application-form"
+    ],
+    "version": "2026-01",
+    "file": "rfda-guide-administrative.pdf"
+  },
+  {
+    "sourceKey": "rfda-guide-reliance",
+    "title": "Guidelines on the reliance registration pathway for human medicines",
+    "kind": "guideline",
+    "productTypes": [
+      "HM"
+    ],
+    "requirementIds": [
+      "sameness",
+      "rra-gmp",
+      "rra-auth"
+    ],
+    "version": "2026-01",
+    "file": "rfda-guide-reliance.pdf"
+  },
+  {
+    "sourceKey": "rfda-guide-ctd",
+    "title": "Guidelines on the Common Technical Document (CTD) for human medicines",
+    "kind": "guideline",
+    "productTypes": [
+      "HM"
+    ],
+    "requirementIds": [
+      "m1",
+      "m2",
+      "m3",
+      "m4",
+      "m5"
+    ],
+    "version": "2026-01",
+    "file": "rfda-guide-ctd.pdf"
+  },
+  {
+    "sourceKey": "rfda-guide-food",
+    "title": "Guidelines on registration of food products",
+    "kind": "guideline",
+    "productTypes": [
+      "PF"
+    ],
+    "requirementIds": [
+      "fsc",
+      "coa",
+      "comp",
+      "fsale",
+      "artwork"
+    ],
+    "version": "2026-01",
+    "file": "rfda-guide-food.pdf"
+  },
+  {
+    "sourceKey": "rfda-guide-cosmetics",
+    "title": "Guidelines on registration of cosmetic products",
+    "kind": "guideline",
+    "productTypes": [
+      "CO"
+    ],
+    "requirementIds": [
+      "gmp",
+      "inci",
+      "safety",
+      "coa",
+      "artwork"
+    ],
+    "version": "2026-01",
+    "file": "rfda-guide-cosmetics.pdf"
+  },
+  {
+    "sourceKey": "rfda-guide-devices",
+    "title": "Guidelines on registration of medical devices",
+    "kind": "guideline",
+    "productTypes": [
+      "MD"
+    ],
+    "requirementIds": [
+      "iso",
+      "doc",
+      "tech",
+      "ifu",
+      "artwork"
+    ],
+    "version": "2026-01",
+    "file": "rfda-guide-devices.pdf"
+  },
+  {
+    "sourceKey": "rfda-guide-veterinary",
+    "title": "Guidelines on registration of veterinary medicines",
+    "kind": "guideline",
+    "productTypes": [
+      "VM"
+    ],
+    "requirementIds": [
+      "gmp",
+      "coa",
+      "spc",
+      "wd",
+      "artwork"
+    ],
+    "version": "2026-01",
+    "file": "rfda-guide-veterinary.pdf"
+  },
+  {
+    "sourceKey": "tpl-declaration-of-sameness",
+    "title": "Template: Declaration of sameness",
+    "kind": "template",
+    "productTypes": [
+      "HM"
+    ],
+    "requirementIds": [
+      "sameness"
+    ],
+    "version": "2026-01",
+    "file": "tpl-declaration-of-sameness.pdf"
+  },
+  {
+    "sourceKey": "tpl-reliance-authorization-letter",
+    "title": "Template: Letter of authorization to share information with Rwanda FDA",
+    "kind": "template",
+    "productTypes": [
+      "HM"
+    ],
+    "requirementIds": [
+      "rra-auth"
+    ],
+    "version": "2026-01",
+    "file": "tpl-reliance-authorization-letter.pdf"
+  },
+  {
+    "sourceKey": "tpl-power-of-attorney",
+    "title": "Template: Power of attorney to the local technical representative",
+    "kind": "template",
+    "productTypes": [],
+    "requirementIds": [
+      "poa"
+    ],
+    "version": "2026-01",
+    "file": "tpl-power-of-attorney.pdf"
+  }
+]

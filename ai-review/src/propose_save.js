@@ -1,7 +1,8 @@
 // Keep only rules whose quote really is in the excerpt, then store them as "proposed".
 const req = $('Validate request').first().json;
 const batches = $('Build prompts').all().map((i) => i.json);
-const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+// Words and numbers only, so small punctuation differences in the model's quote don't drop a good proposal.
+const norm = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim();
 const esc = (s) => "'" + String(s).replace(/\u0000/g, '').replace(/'/g, "''") + "'";
 const arr = (a) => `ARRAY[${a.map(esc).join(',')}]::text[]`;
 // Short stable hash so the same proposal from a re-run gets the same code (and is not duplicated).

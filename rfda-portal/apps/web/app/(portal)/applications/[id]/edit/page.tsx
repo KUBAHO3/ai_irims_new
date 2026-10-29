@@ -8,6 +8,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import useSWR, { mutate } from 'swr';
 import { Icon } from '@/components/Icon';
+import { AiPrecheck } from '@/components/AiReview';
 import { PayModal } from '@/components/modals';
 import { NotFound } from '@/components/NotFound';
 import { storeApp } from '@/components/session';
@@ -290,8 +291,9 @@ function FinishStep({ app, goStep }: { app: ApplicationDto; goStep: (s: number) 
     <>
       <div className={issues.length ? 'notice gold' : 'notice'} style={issues.length ? undefined : { background: 'var(--green-soft)', borderColor: 'transparent' }}>
         <strong>{issues.length ? `${issues.length} item${issues.length > 1 ? 's' : ''} to complete before you can ${next}` : `Your application is complete. You can now ${next}.`}</strong>
-        {issues.length > 0 && <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>{issues.map((i, n) => <li key={n}><button className="btn link small" onClick={() => goStep(i.step)}>{i.msg}</button></li>)}</ul>}
+        {issues.length > 0 && <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>{issues.map((i, n) => <li key={n}><button className="btn link small" style={{ whiteSpace: 'normal', textAlign: 'left' }} onClick={() => goStep(i.step)}>{i.msg}</button></li>)}</ul>}
       </div>
+      <div style={{ marginTop: 16 }}><AiPrecheck app={app} /></div>
       <div className="row" style={{ marginTop: 16 }}>
         <Link className="btn primary" href={`/applications/${app.id}${app.status === 'queried' ? '?tab=queries' : ''}`}>{app.status === 'queried' ? 'Go to the query' : 'Back to application'}</Link>
       </div>
@@ -334,13 +336,10 @@ function ReviewStep({ app, goStep, flush }: { app: ApplicationDto; goStep: (s: n
     <>
       <div className={issues.length ? 'notice gold' : 'notice'} style={issues.length ? undefined : { background: 'var(--green-soft)', borderColor: 'transparent' }}>
         <strong>{issues.length ? `${issues.length} item${issues.length > 1 ? 's' : ''} to complete before you can submit` : 'Your application is complete'}</strong>
-        {issues.length ? <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>{issues.map((i, n) => <li key={n}><button className="btn link small" onClick={() => goStep(i.step)}>{i.msg}</button></li>)}</ul>
+        {issues.length ? <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>{issues.map((i, n) => <li key={n}><button className="btn link small" style={{ whiteSpace: 'normal', textAlign: 'left' }} onClick={() => goStep(i.step)}>{i.msg}</button></li>)}</ul>
           : <p className="small" style={{ marginTop: 4 }}>All required details and documents are in place.</p>}
       </div>
-      <div className="ai-slot" style={{ marginTop: 16 }}><div className="row"><span className="ai-tag"><Icon name="spark" /> AI pre-check</span><span className="small muted">Coming soon</span></div>
-        <p style={{ marginTop: 8 }}><strong>Check my dossier against Rwanda FDA guidelines</strong></p>
-        <p className="small muted">Planned: before you submit, this will check your label text and documents against the published requirements and point out likely queries, such as a storage statement without a temperature. It will advise only; assessors still decide.</p>
-        <div className="row" style={{ marginTop: 10 }}><button className="btn small" disabled>Run AI pre-check</button></div></div>
+      <div style={{ marginTop: 16 }}><AiPrecheck app={app} beforeRequest={flush} /></div>
       <div style={{ marginTop: 8 }}>
         <Sec i={0} title="Product details"><Facts pairs={[['Brand name', app.brand], [isMedicine(app.type) ? 'Active ingredient' : 'Common name', app.generic], ['Category', app.category], ['Form', app.form], [t.sizeLabel, app.size], ['Intended users', app.intendedUsers], ['Storage', app.storage], ['Shelf life', app.shelfLife ? app.shelfLife + ' months' : '']]} /></Sec>
         <Sec i={1} title="Manufacturer and representative"><Facts pairs={[['Manufacturer', app.mfrName], ['Country', app.mfrCountry], ['Site address', app.mfrAddress], ['Origin', app.origin], ['Reference authority', app.srA === 'Yes' ? app.refAuthority : 'Not applicable'], ['Local technical representative', app.ltr]]} /></Sec>

@@ -12,7 +12,7 @@ import { storeApp } from './session';
 import { useBusy, useModal, useToast } from './ui';
 
 export type Role = 'applicant' | 'fda';
-export type TabKey = 'overview' | 'documents' | 'payment' | 'queries' | 'history';
+export type TabKey = 'overview' | 'documents' | 'payment' | 'queries' | 'history' | 'ai';
 
 export function Tabs({ tabs, tab, setTab, app }: { tabs: [TabKey, string][]; tab: TabKey; setTab: (t: TabKey) => void; app: ApplicationDto }) {
   const openQ = app.queries.filter((q) => q.from === 'fda' && !q.answered).length;

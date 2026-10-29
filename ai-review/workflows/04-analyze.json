@@ -1,0 +1,877 @@
+{
+  "id": "aiRevAnalyze0001",
+  "name": "AI review - 4. Analyze submission",
+  "nodes": [
+    {
+      "id": "913c1675-1a7c-5f6c-9f58-f475658ee1d2",
+      "name": "Webhook POST /ai/analyses",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai/analyses",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "b5480a98-677d-59b4-bd1a-94e07f533e63",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "airevApiKey00001",
+          "name": "AI review API key"
+        }
+      }
+    },
+    {
+      "id": "403f087c-1e7f-5f61-a1ea-ece46706a266",
+      "name": "Validate request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ---- Settings ---------------------------------------------------------------\nconst CONFIG = {\n  llmProvider: 'openai',        // 'openai' (credential \"OpenAI account\") or 'ollama' (local, no data leaves the server)\n  llmModel: 'gpt-4o-mini',      // for Ollama use e.g. 'qwen2.5:7b'\n  ollamaUrl: 'http://ollama:11434',\n  embedModel: 'bge-m3',         // local embeddings, 1024 dimensions: must match vector(1024) in the schema\n  topKEvidence: 5,              // submission excerpts given to the LLM per rule\n  topKKb: 3,                    // knowledge-base excerpts given to the LLM per rule\n  chunkSize: 1200,\n  chunkOverlap: 200,\n  embedBatch: 32,\n  maxChunksPerDocument: 400,    // very long documents are cut here (reported in the result)\n};\nconst PRODUCT_TYPES = ['HM', 'VM', 'PF', 'CO', 'MD'];\n// -----------------------------------------------------------------------------\n\nconst req = $input.first();\nconst body = req.json.body || {};\nconst errors = [];\n\nconst applicationRef = String(body.applicationRef || '').trim();\nif (!/^[A-Za-z0-9/_.-]{1,64}$/.test(applicationRef)) errors.push('applicationRef is required, e.g. RFDA26/HM/0207');\nconst productType = String(body.productType || '').trim().toUpperCase();\nif (!PRODUCT_TYPES.includes(productType)) errors.push(`productType must be one of ${PRODUCT_TYPES.join(', ')}`);\n\nlet fields = body.fields || {};\nif (typeof fields === 'string') { try { fields = JSON.parse(fields); } catch (e) { errors.push('fields must be a JSON object'); fields = {}; } }\nif (!fields || typeof fields !== 'object' || Array.isArray(fields)) { errors.push('fields must be a JSON object'); fields = {}; }\nconst labelText = String(body.labelText || '').trim();\nconst callbackUrl = String(body.callbackUrl || '').trim();\nif (callbackUrl && !/^https?:\\/\\/\\S+$/.test(callbackUrl)) errors.push('callbackUrl must be an http(s) URL');\n\n// Each file's form field name is its document requirement id: m3, rra-gmp, artwork; a second file is m3__2.\nconst files = Object.entries(req.binary || {}).map(([key, b]) => ({ key, requirementId: key.split('__')[0].toLowerCase(), fileName: b.fileName || key, size: b.fileSize || null }));\nfiles.filter((f) => !/^[a-z0-9-]{1,40}$/.test(f.requirementId)).forEach((f) => errors.push(`File field \"${f.key}\": name it after the document requirement, e.g. m3 or m3__2`));\nif (!files.length && !labelText && !Object.keys(fields).length) errors.push('Send at least one file, labelText or fields');\n\nconst request = { applicationRef, productType, fieldNames: Object.keys(fields), labelText: !!labelText, files: files.map(({ key, requirementId, fileName, size }) => ({ key, requirementId, fileName, size })) };\nreturn [{ json: { valid: !errors.length, errors, applicationRef, productType, fields, labelText, callbackUrl, files, request, config: CONFIG } }];\n"
+      }
+    },
+    {
+      "id": "33bc3043-8e68-534c-ac15-a850a115ed44",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "945c5c27-919d-5409-8f98-230807f326fb",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "97014df8-dbd3-55be-a9de-8dfc24129f18",
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        200
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ message: 'Invalid request', errors: $json.errors }) }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "5391e883-8af3-5bce-aa35-b7953ac9b8e6",
+      "name": "Create analysis record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO analyses (status, application_ref, product_type, request, callback_url, execution_id)\nVALUES ('running', $1, $2, $3::jsonb, NULLIF($4, ''), $5)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$json.applicationRef, $json.productType, JSON.stringify($json.request), $json.callbackUrl, $execution.id] }}"
+        }
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      }
+    },
+    {
+      "id": "a2068fc1-4919-5461-98a2-8f149cb2a927",
+      "name": "Respond 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ analysisId: $json.id, status: 'running', statusUrl: '/webhook/ai/analyses?id=' + $json.id }) }}",
+        "options": {
+          "responseCode": 202,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "f14edcc4-ad18-5bf6-b88e-c2900f0b2ffa",
+      "name": "Prepare documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// One item per document: uploaded files, plus the form fields and label text as virtual documents.\nconst v = $('Validate request').first().json;\nconst bins = $('Webhook POST /ai/analyses').first().binary || {};\nconst items = [];\nconst inline = (requirementId, fileName, text) => items.push({\n  json: { requirementId, fileName },\n  binary: { data: { data: Buffer.from(text, 'utf8').toString('base64'), mimeType: 'text/plain', fileName } },\n});\n\nconst lines = Object.entries(v.fields).map(([k, val]) => `${k}: ${typeof val === 'object' ? JSON.stringify(val) : val}`);\nif (lines.length) inline('application-form', 'application-form.txt', 'Application form\\n' + lines.join('\\n'));\nif (v.labelText) inline('artwork', 'label-text.txt', 'Label text\\n' + v.labelText);\nfor (const f of v.files) items.push({ json: { requirementId: f.requirementId, fileName: f.fileName }, binary: { data: bins[f.key] } });\nreturn items;\n"
+      }
+    },
+    {
+      "id": "a09dce81-fb65-58e2-a8ec-c03786cef9c9",
+      "name": "Extract text (Tika)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "http://tika:9998/tika/html",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "text/html"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "e4ad3af7-3675-5317-a3bb-271fb8155875",
+      "name": "Split into chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "jsCode": "function htmlToText(html) {\n  return String(html)\n    .replace(/<head[\\s\\S]*?<\\/head>/gi, '')\n    .replace(/<(script|style)[\\s\\S]*?<\\/\\1>/gi, '')\n    .replace(/<br\\s*\\/?>|<\\/(p|div|h[1-6]|li|tr)>/gi, '\\n')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\").replace(/&amp;/g, '&')\n    .replace(/[ \\t]+/g, ' ')\n    .replace(/ *\\n */g, '\\n')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\nfunction chunkText(text, size, overlap) {\n  const out = [];\n  let start = 0;\n  while (start < text.length) {\n    let end = Math.min(start + size, text.length);\n    if (end < text.length) {\n      const brk = Math.max(text.lastIndexOf('\\n', end), text.lastIndexOf('. ', end));\n      if (brk > start + size * 0.5) end = brk + 1;\n    }\n    const piece = text.slice(start, end).trim();\n    if (piece) out.push(piece);\n    if (end >= text.length) break;\n    start = Math.max(end - overlap, start + 1);\n  }\n  return out;\n}\n\n// Tika returns XHTML; PDFs come back with one <div class=\"page\"> per page.\nfunction splitPages(html) {\n  const parts = String(html).split(/<div class=\"page\">/i);\n  if (parts.length > 1) return parts.slice(1).map((p, i) => ({ page: i + 1, text: htmlToText(p) }));\n  return [{ page: null, text: htmlToText(html) }];\n}\n\nconst cfg = $('Validate request').first().json.config;\nconst docs = $('Prepare documents').all().map((i) => i.json);\n\nconst chunks = [];\nconst documents = [];\n$input.all().forEach((item, i) => {\n  const d = docs[i];\n  let n = 0, pages = 0, characters = 0, truncated = false;\n  for (const { page, text } of splitPages(item.json.data || '')) {\n    if (page) pages = page;\n    characters += text.length;\n    for (const piece of chunkText(text, cfg.chunkSize, cfg.chunkOverlap)) {\n      if (n >= cfg.maxChunksPerDocument) { truncated = true; break; }\n      chunks.push({ id: 'S' + (chunks.length + 1), requirementId: d.requirementId, file: d.fileName, page, text: piece });\n      n++;\n    }\n  }\n  documents.push({ requirementId: d.requirementId, fileName: d.fileName, pages: pages || null, characters, chunks: n, truncated, noText: characters === 0 });\n});\nif (!chunks.length) throw new Error('No text could be extracted from the documents (scanned files without OCR?)');\n\nconst out = [];\nfor (let i = 0; i < chunks.length; i += cfg.embedBatch) {\n  out.push({ json: { model: cfg.embedModel, input: chunks.slice(i, i + cfg.embedBatch).map((c) => c.text), ...(i === 0 ? { chunks, documents } : {}) } });\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "92d397b0-7f8a-5dd5-86cf-ef4b4ba79640",
+      "name": "Embed submission",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate request').first().json.config.ollamaUrl }}/api/embed",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.model, input: $json.input }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      }
+    },
+    {
+      "id": "5eb3cacf-3e16-504f-a275-930b3cda789f",
+      "name": "Load rules",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT rule_code, rule_text, severity, COALESCE(guidance, '') AS guidance, requirement_ids, version\nFROM guideline_rules\nWHERE status = 'active' AND (cardinality(product_types) = 0 OR $1 = ANY(product_types))\nORDER BY rule_code;",
+        "options": {
+          "queryReplacement": "={{ [$('Validate request').first().json.productType] }}"
+        }
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "b0aa6a73-c35a-5d83-8e24-8b0cccd989ad",
+      "name": "Scope rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Decide which rules to evaluate, and against which documents.\n// A rule with requirement ids is checked only against those documents; without, against everything sent.\nconst v = $('Validate request').first().json;\nconst { documents } = $('Split into chunks').first().json;\nconst rows = $input.all().map((i) => i.json).filter((r) => r && r.rule_code);\nconst provided = [...new Set(documents.filter((d) => d.chunks > 0).map((d) => d.requirementId))];\n\nconst evaluate = [], skipped = [];\nfor (const r of rows) {\n  const wanted = (r.requirement_ids || []).filter((id) => /^[a-z0-9-]{1,40}$/.test(id));\n  const use = wanted.length ? wanted.filter((id) => provided.includes(id)) : provided;\n  const base = { ruleCode: r.rule_code, rule: r.rule_text, severity: r.severity, requirementIds: wanted, version: r.version };\n  if (!use.length) skipped.push({ ...base, reason: `Not evaluated: no ${wanted.join(' or ')} document was sent` });\n  else evaluate.push({ ...base, guidance: r.guidance, use });\n}\nreturn [{ json: { evaluate, skipped, model: v.config.embedModel, input: evaluate.map((r) => r.rule + (r.guidance ? '\\n' + r.guidance : '')) } }];\n"
+      }
+    },
+    {
+      "id": "e57a325a-6a0d-5dfb-95c3-a40248529007",
+      "name": "Any rules to evaluate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4ab2bd15-ced3-5f02-88f3-125dc31d8828",
+              "leftValue": "={{ $json.evaluate.length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b3de95ee-6e68-5be6-83a2-6874393c29f4",
+      "name": "Embed rules",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate request').first().json.config.ollamaUrl }}/api/embed",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.model, input: $json.input }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      }
+    },
+    {
+      "id": "75221aea-36b1-5047-a0ce-5fbf27e2f66a",
+      "name": "Select evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        0
+      ],
+      "parameters": {
+        "jsCode": "function cosine(a, b) {\n  let dot = 0, na = 0, nb = 0;\n  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }\n  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);\n}\nconst v = $('Validate request').first().json;\nconst { chunks } = $('Split into chunks').first().json;\nconst chunkVecs = $('Embed submission').all().flatMap((i) => i.json.embeddings);\nconst { evaluate } = $('Scope rules').first().json;\nconst ruleVecs = $input.first().json.embeddings;\n\n// One item per rule: the best excerpts from the documents that rule applies to.\nreturn evaluate.map((r, i) => {\n  const evidence = chunks\n    .map((c, j) => ({ c, j }))\n    .filter(({ c }) => r.use.includes(c.requirementId))\n    .map(({ c, j }) => ({ ...c, score: Math.round(cosine(ruleVecs[i], chunkVecs[j]) * 1000) / 1000 }))\n    .sort((a, b) => b.score - a.score)\n    .slice(0, v.config.topKEvidence);\n  return {\n    json: {\n      ...r, evidence,\n      ruleVec: '[' + ruleVecs[i].join(',') + ']',\n      reqArray: `ARRAY[${r.use.map((id) => `'${id}'`).join(',')}]::text[]`,\n    },\n  };\n});\n"
+      }
+    },
+    {
+      "id": "afcc497f-8849-5a84-86b9-7ce0667fb56b",
+      "name": "Search knowledge base",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        3360,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH q AS (SELECT '{{ $json.ruleVec }}'::vector AS v)\nSELECT '{{ $json.ruleCode }}' AS rule_code, COALESCE(json_agg(t ORDER BY t.distance), '[]'::json) AS kb\nFROM (\n  SELECT 'K' || c.id AS id, d.title, d.source_key, d.kind, c.page, c.content AS text,\n         round((c.embedding <=> q.v)::numeric, 4) AS distance\n  FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id, q\n  WHERE d.active\n    AND (cardinality(d.product_types) = 0 OR '{{ $('Validate request').first().json.productType }}' = ANY(d.product_types))\n    AND (cardinality(d.requirement_ids) = 0 OR d.requirement_ids && {{ $json.reqArray }})\n  ORDER BY c.embedding <=> q.v\n  LIMIT {{ $('Validate request').first().json.config.topKKb }}\n) t;",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      }
+    },
+    {
+      "id": "4db4d3b7-f5dd-5714-a2f7-1907d1deb3b2",
+      "name": "Build prompts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// LLM request and response helpers, shared by every node that talks to the model.\n// OpenAI uses strict JSON-schema output; Ollama uses its \"format\" option.\nfunction strictSchema(s) {\n  // OpenAI strict mode: every object lists all its properties as required and allows no others.\n  if (s && s.type === 'object') return { ...s, additionalProperties: false, required: Object.keys(s.properties), properties: Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, strictSchema(v)])) };\n  if (s && s.type === 'array') return { ...s, items: strictSchema(s.items) };\n  return s;\n}\nfunction llmRequest(config, system, user, schema, name) {\n  const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];\n  if (config.llmProvider === 'openai') {\n    return { model: config.llmModel, temperature: 0, messages, response_format: { type: 'json_schema', json_schema: { name, strict: true, schema: strictSchema(schema) } } };\n  }\n  return { model: config.llmModel, stream: false, format: schema, options: { temperature: 0, num_ctx: 8192 }, messages };\n}\n// Returns { data, error, tokens } from either provider's response item.\nfunction llmResult(json) {\n  if (json.error) return { data: null, error: String(json.error.message || json.error), tokens: 0 };\n  const content = json.choices ? json.choices[0] && json.choices[0].message && json.choices[0].message.content : json.message && json.message.content;\n  const tokens = json.usage ? json.usage.total_tokens || 0 : (json.prompt_eval_count || 0) + (json.eval_count || 0);\n  try { return { data: JSON.parse(content || ''), error: null, tokens }; } catch (e) { return { data: null, error: 'Invalid JSON from the model', tokens }; }\n}\n\nconst v = $('Validate request').first().json;\nconst selected = $('Select evidence').all().map((i) => i.json);\nconst today = new Date().toISOString().slice(0, 10);\n\nconst schema = {\n  type: 'object',\n  properties: {\n    status: { type: 'string', enum: ['pass', 'fail', 'unclear', 'not_applicable'] },\n    confidence: { type: 'number' },\n    explanation: { type: 'string' },\n    evidence: { type: 'array', items: { type: 'object', properties: { chunkId: { type: 'string' }, quote: { type: 'string' } }, required: ['chunkId', 'quote'] } },\n    kbReferences: { type: 'array', items: { type: 'string' } },\n    suggestion: { type: 'string' },\n  },\n  required: ['status', 'confidence', 'explanation', 'evidence', 'kbReferences', 'suggestion'],\n};\n\nconst system = `You are a meticulous Rwanda FDA reviewer. You evaluate ONE rule at a time against excerpts from an applicant's submission.\nToday's date is ${today}. Use it for any validity or expiry check.\n\nDecide the status:\n- \"pass\": the SUBMISSION EXCERPTS clearly show the rule is met.\n- \"fail\": the SUBMISSION EXCERPTS clearly show the rule is not met, or contain something that contradicts it.\n- \"unclear\": the excerpts do not contain enough information to decide. The excerpts are only part of the submission, so missing information means \"unclear\", not \"fail\".\n- \"not_applicable\": the excerpts show the rule does not apply to this product.\n\nRules for your answer:\n- Base the decision only on the SUBMISSION EXCERPTS. KNOWLEDGE BASE excerpts (guidelines, templates, references) explain how to interpret the rule; they are never evidence that the submission complies. A TEMPLATE shows the structure a document is expected to follow.\n- For \"pass\" or \"fail\", add evidence items. chunkId must be an S-id shown in the excerpts. If the rule compares documents (for example the label with the application form), quote EACH of them; if one of them says nothing on the point, the status is \"fail\" or \"unclear\", never \"pass\". quote must be copied word for word from that excerpt, at most 30 words.\n- kbReferences: the K-ids you relied on, or an empty list.\n- explanation: 1 to 3 plain sentences a human reviewer can check.\n- suggestion: for \"fail\" or \"unclear\", one sentence telling the applicant what to provide or correct; otherwise an empty string.\n- confidence: a number between 0 and 1.\nRespond with JSON only.`;\n\nconst where = (name, page) => `${name}${page ? ', page ' + page : ''}`;\nreturn $input.all().map((item) => {\n  const row = item.json;\n  const r = selected.find((s) => s.ruleCode === row.rule_code);\n  const kb = Array.isArray(row.kb) ? row.kb : (typeof row.kb === 'string' ? JSON.parse(row.kb) : []);\n  const kbText = kb.length ? kb.map((k) => `[${k.id}] ${k.kind.toUpperCase()}: ${where(k.title, k.page)}\\n${k.text}`).join('\\n\\n') : '(none)';\n  const evText = r.evidence.map((e) => `[${e.id}] (${e.requirementId}: ${where(e.file, e.page)})\\n${e.text}`).join('\\n\\n');\n  const user = [\n    `RULE ${r.ruleCode} (severity: ${r.severity})`, r.rule,\n    r.guidance ? `Reviewer guidance: ${r.guidance}` : '',\n    `Product type: ${v.productType}. Application: ${v.applicationRef}.`,\n    '', 'KNOWLEDGE BASE:', kbText, '', 'SUBMISSION EXCERPTS:', evText,\n  ].join('\\n');\n  return {\n    json: {\n      ruleCode: r.ruleCode, rule: r.rule, severity: r.severity, requirementIds: r.requirementIds, version: r.version, use: r.use,\n      evidence: r.evidence, kb: kb.map(({ id, title, source_key, kind, page }) => ({ id, title, sourceKey: source_key, kind, page })),\n      request: llmRequest(v.config, system, user, schema, 'rule_finding'),\n    },\n  };\n});\n"
+      }
+    },
+    {
+      "id": "c8100895-b428-566f-b9f9-093fe9a4c623",
+      "name": "Use OpenAI?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3840,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0e39b1aa-cd1b-5cea-aaa3-93278ccaa32a",
+              "leftValue": "={{ $('Validate request').first().json.config.llmProvider === 'openai' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1599cf81-4088-5ae7-86fe-aad111fc3b4d",
+      "name": "Evaluate rule (OpenAI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4080,
+        -100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 120000,
+          "batching": {
+            "batch": {
+              "batchSize": 4,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "airevOpenAi00001",
+          "name": "OpenAI account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "62405c52-74f8-5073-9fdb-b132e03f8d32",
+      "name": "Evaluate rule (Ollama)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4080,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate request').first().json.config.ollamaUrl }}/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 900000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 0
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "aa8103cb-cf2a-5b1d-96c6-2516f99c7b5c",
+      "name": "Validate findings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4320,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// LLM request and response helpers, shared by every node that talks to the model.\n// OpenAI uses strict JSON-schema output; Ollama uses its \"format\" option.\nfunction strictSchema(s) {\n  // OpenAI strict mode: every object lists all its properties as required and allows no others.\n  if (s && s.type === 'object') return { ...s, additionalProperties: false, required: Object.keys(s.properties), properties: Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, strictSchema(v)])) };\n  if (s && s.type === 'array') return { ...s, items: strictSchema(s.items) };\n  return s;\n}\nfunction llmRequest(config, system, user, schema, name) {\n  const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];\n  if (config.llmProvider === 'openai') {\n    return { model: config.llmModel, temperature: 0, messages, response_format: { type: 'json_schema', json_schema: { name, strict: true, schema: strictSchema(schema) } } };\n  }\n  return { model: config.llmModel, stream: false, format: schema, options: { temperature: 0, num_ctx: 8192 }, messages };\n}\n// Returns { data, error, tokens } from either provider's response item.\nfunction llmResult(json) {\n  if (json.error) return { data: null, error: String(json.error.message || json.error), tokens: 0 };\n  const content = json.choices ? json.choices[0] && json.choices[0].message && json.choices[0].message.content : json.message && json.message.content;\n  const tokens = json.usage ? json.usage.total_tokens || 0 : (json.prompt_eval_count || 0) + (json.eval_count || 0);\n  try { return { data: JSON.parse(content || ''), error: null, tokens }; } catch (e) { return { data: null, error: 'Invalid JSON from the model', tokens }; }\n}\n\nconst prompts = $('Build prompts').all().map((i) => i.json);\nconst norm = (s) => String(s || '').toLowerCase().replace(/\\s+/g, ' ').trim();\nconst STATUSES = ['pass', 'fail', 'unclear', 'not_applicable'];\n\nlet tokens = 0;\nconst findings = $input.all().map((item, i) => {\n  const p = prompts[i];\n  const base = { ruleCode: p.ruleCode, rule: p.rule, severity: p.severity, requirementIds: p.requirementIds, ruleVersion: p.version };\n  const out = llmResult(item.json);\n  tokens += out.tokens;\n  const r = out.data;\n  if (!r || !STATUSES.includes(r.status)) {\n    return { ...base, status: 'unclear', confidence: 0, explanation: 'The model output could not be used; manual review needed.', suggestion: '', evidence: [], kbReferences: [],\n      checks: { parsed: false, notes: [out.error || 'Unexpected answer from the model'] } };\n  }\n  // Every quote must really exist in the excerpt the model cited.\n  const byId = Object.fromEntries(p.evidence.map((e) => [e.id, e]));\n  const evidence = (r.evidence || []).map((ev) => {\n    const src = byId[ev.chunkId];\n    return { chunkId: ev.chunkId, requirementId: src ? src.requirementId : null, document: src ? src.file : null, page: src ? src.page : null,\n      quote: ev.quote, verified: !!src && !!norm(ev.quote) && norm(src.text).includes(norm(ev.quote)) };\n  });\n  const notes = [];\n  let status = r.status;\n  if ((status === 'pass' || status === 'fail') && !evidence.some((e) => e.verified)) {\n    notes.push(`Model answered \"${status}\" but no quote could be verified in the submission; downgraded to \"unclear\".`);\n    status = 'unclear';\n  }\n  // A rule that compares documents only passes with a verified quote from each document it was checked against.\n  if (status === 'pass' && p.use.length > 1) {\n    const quoted = new Set(evidence.filter((e) => e.verified).map((e) => e.requirementId));\n    const missing = p.use.filter((id) => !quoted.has(id));\n    if (missing.length) {\n      notes.push(`Model answered \"pass\" without quoting ${missing.join(', ')}; a comparison needs evidence from every document. Downgraded to \"unclear\".`);\n      status = 'unclear';\n    }\n  }\n  const kbById = Object.fromEntries(p.kb.map((k) => [k.id, k]));\n  return {\n    ...base, status, confidence: Math.max(0, Math.min(1, Number(r.confidence) || 0)), explanation: r.explanation || '',\n    suggestion: status === 'fail' || status === 'unclear' ? String(r.suggestion || '') : '',\n    evidence, kbReferences: (r.kbReferences || []).filter((id) => kbById[id]).map((id) => kbById[id]),\n    checks: { parsed: true, notes },\n  };\n});\n// Every call failing means a setup problem (wrong key, no credit, model down), not unclear rules: fail the run.\nconst failed = findings.filter((f) => !f.checks.parsed);\nif (findings.length && failed.length === findings.length) throw new Error(`Every LLM call failed. First error: ${failed[0].checks.notes[0]}`);\nreturn [{ json: { findings, tokens } }];\n"
+      }
+    },
+    {
+      "id": "f6814cab-a070-5100-b5ae-064c133422cd",
+      "name": "Build report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4560,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const v = $('Validate request').first().json;\nconst analysisId = $('Create analysis record').first().json.id;\nconst { documents } = $('Split into chunks').first().json;\nconst { skipped } = $('Scope rules').first().json;\nconst findings = $input.first().json.findings || [];   // empty when no rule applied\nconst tokens = $input.first().json.tokens || 0;\n\nconst count = (s) => findings.filter((f) => f.status === s).length;\nconst counts = { pass: count('pass'), fail: count('fail'), unclear: count('unclear'), not_applicable: count('not_applicable'), evaluated: findings.length, skipped: skipped.length };\nlet verdict = 'compliant';\nif (findings.some((f) => f.status === 'fail' && ['critical', 'major'].includes(f.severity))) verdict = 'non_compliant';\nelse if (counts.fail || counts.unclear || !findings.length) verdict = 'needs_review';\n\nconst order = { fail: 0, unclear: 1, pass: 2, not_applicable: 3 };\nconst sev = { critical: 0, major: 1, minor: 2 };\nconst result = {\n  analysisId, status: 'completed', applicationRef: v.applicationRef, productType: v.productType,\n  overall: { verdict, counts },\n  summary: `${counts.fail} of ${counts.evaluated} rules failed; ${counts.unclear} unclear; ${counts.pass} passed; ${counts.skipped} not evaluated.`,\n  findings: [...findings].sort((a, b) => order[a.status] - order[b.status] || sev[a.severity] - sev[b.severity]),\n  skipped,\n  documents,\n  trace: {\n    embedModel: v.config.embedModel, llmProvider: v.config.llmProvider, llmModel: v.config.llmModel, llmTokens: tokens,\n    ruleVersions: Object.fromEntries([...findings, ...skipped].map((f) => [f.ruleCode, f.ruleVersion ?? f.version])),\n    analyzedAt: new Date().toISOString(),\n  },\n};\nreturn [{ json: { analysisId, resultJson: JSON.stringify(result) } }];\n"
+      }
+    },
+    {
+      "id": "931302d0-b681-5753-9b8d-0a0d21274aed",
+      "name": "Save result",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        4800,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE analyses SET status = 'completed', result = $1::jsonb, finished_at = now()\nWHERE id = $2::uuid\nRETURNING id, COALESCE(callback_url, '') AS callback_url;",
+        "options": {
+          "queryReplacement": "={{ [$json.resultJson, $json.analysisId] }}"
+        }
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      }
+    },
+    {
+      "id": "438a2868-7fac-545e-9266-34d314787a98",
+      "name": "Callback URL given?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5040,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "02f602b4-86c1-57c1-a32d-8488dc6f624b",
+              "leftValue": "={{ $json.callback_url !== '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d342afef-e817-52ed-ab63-8bea4074b05a",
+      "name": "Send result to portal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5280,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.callback_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $('Build report').first().json.resultJson }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "airevCallback001",
+          "name": "Portal callback key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook POST /ai/analyses": {
+      "main": [
+        [
+          {
+            "node": "Validate request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate request": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Create analysis record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create analysis record": {
+      "main": [
+        [
+          {
+            "node": "Respond 202",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 202": {
+      "main": [
+        [
+          {
+            "node": "Prepare documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare documents": {
+      "main": [
+        [
+          {
+            "node": "Extract text (Tika)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract text (Tika)": {
+      "main": [
+        [
+          {
+            "node": "Split into chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split into chunks": {
+      "main": [
+        [
+          {
+            "node": "Embed submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed submission": {
+      "main": [
+        [
+          {
+            "node": "Load rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load rules": {
+      "main": [
+        [
+          {
+            "node": "Scope rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scope rules": {
+      "main": [
+        [
+          {
+            "node": "Any rules to evaluate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any rules to evaluate?": {
+      "main": [
+        [
+          {
+            "node": "Embed rules",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed rules": {
+      "main": [
+        [
+          {
+            "node": "Select evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select evidence": {
+      "main": [
+        [
+          {
+            "node": "Search knowledge base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search knowledge base": {
+      "main": [
+        [
+          {
+            "node": "Build prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use OpenAI?": {
+      "main": [
+        [
+          {
+            "node": "Evaluate rule (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Evaluate rule (Ollama)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build prompts": {
+      "main": [
+        [
+          {
+            "node": "Use OpenAI?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate rule (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Validate findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate rule (Ollama)": {
+      "main": [
+        [
+          {
+            "node": "Validate findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate findings": {
+      "main": [
+        [
+          {
+            "node": "Build report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build report": {
+      "main": [
+        [
+          {
+            "node": "Save result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save result": {
+      "main": [
+        [
+          {
+            "node": "Callback URL given?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback URL given?": {
+      "main": [
+        [
+          {
+            "node": "Send result to portal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "aiRevErrors00001"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

@@ -44,6 +44,9 @@ services:
       TZ: Africa/Kigali
       N8N_SECURE_COOKIE: "false"     # prototype over plain HTTP only
       N8N_PAYLOAD_SIZE_MAX: "64"     # MB, allows larger uploads
+      # OpenAI key for the AI review workflows, read from .env (never stored in n8n).
+      # Fills the "OpenAI account" credential, whose own API Key field is left empty.
+      CREDENTIALS_OVERWRITE_DATA: '{"openAiApi":{"apiKey":"${OPENAI_API_KEY:-}"}}'
     volumes:
       - n8n_data:/home/node/.n8n
     depends_on:

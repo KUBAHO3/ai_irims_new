@@ -1,0 +1,536 @@
+{
+  "id": "aiRevPropose0001",
+  "name": "AI review - 3. Propose rules from a document",
+  "nodes": [
+    {
+      "id": "a0dacffe-c17d-567d-9fd2-9ad76ec7aaea",
+      "name": "Webhook POST /ai/rules/propose",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai/rules/propose",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "c419aebe-21ca-5e22-8e86-9acb017c320d",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "airevApiKey00001",
+          "name": "AI review API key"
+        }
+      }
+    },
+    {
+      "id": "961b19be-f83e-512d-9b22-ba2143077598",
+      "name": "Validate request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ---- Settings ---------------------------------------------------------------\nconst CONFIG = {\n  llmProvider: 'openai',   // 'openai' (credential \"OpenAI account\") or 'ollama' (local, no data leaves the server)\n  llmModel: 'gpt-4o-mini', // for Ollama use e.g. 'qwen2.5:7b'\n  ollamaUrl: 'http://ollama:11434',\n  maxChars: 3500,          // text per LLM call\n  defaultMaxChunks: 40,    // chunks read per request unless \"maxChunks\" is sent\n};\n// The portal's document requirements (keep in sync with packages/shared/src/reference.ts).\nconst REQUIREMENTS = {\n  'application-form': 'Application form fields', artwork: 'Label or artwork',\n  cover: 'Cover letter', poa: 'Power of attorney', ltrletter: 'Letter appointing the local technical representative', tm: 'Trademark agreement',\n  sameness: 'Declaration of sameness', 'rra-gmp': 'GMP certificate issued by the reference regulatory authority',\n  'rra-auth': 'Letter of authorization for the reference regulatory authority to share information with Rwanda FDA',\n  m1: 'CTD Module 1: Administrative and prescribing information', m2: 'CTD Module 2: Summaries', m3: 'CTD Module 3: Quality',\n  m4: 'CTD Module 4: Non-clinical study reports', m5: 'CTD Module 5: Clinical studies', other: 'Other documents',\n  gmp: 'GMP certificate', coa: 'Certificate of analysis', spc: 'Summary of product characteristics', wd: 'Withdrawal period justification',\n  fsc: 'Food safety certificate', comp: 'Product composition', fsale: 'Free sale certificate', inci: 'Ingredient list (INCI)',\n  safety: 'Product safety assessment', iso: 'ISO 13485 certificate', doc: 'Declaration of conformity', tech: 'Technical file summary', ifu: 'Instructions for use',\n};\n// -----------------------------------------------------------------------------\nconst body = $input.first().json.body || {};\nconst sourceKey = String(body.sourceKey || '').trim().toLowerCase();\nconst maxChunks = Math.min(500, Math.max(1, parseInt(body.maxChunks, 10) || CONFIG.defaultMaxChunks));\nconst errors = [];\nif (!/^[a-z0-9][a-z0-9_.-]{1,80}$/.test(sourceKey)) errors.push('sourceKey is required: the id used when the document was uploaded');\nreturn [{ json: { valid: !errors.length, errors, sourceKey, maxChunks, config: CONFIG, requirements: REQUIREMENTS } }];\n"
+      }
+    },
+    {
+      "id": "3222c476-8896-5626-8f7f-e2a0c1143aeb",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5e544dce-6ba0-5b0a-9fba-6ecd8abe7791",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "db2a0bfd-3eff-59e5-b1f9-851fad0c0c3c",
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        200
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ message: 'Invalid request', errors: $json.errors }) }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "f36bd251-dfa6-5d5b-a4bb-b5430b6221bf",
+      "name": "Load document",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT d.id AS document_id, d.title, d.kind, d.product_types, d.requirement_ids, c.page, c.content\nFROM kb_documents d JOIN kb_chunks c ON c.document_id = d.id\nWHERE d.source_key = $1\nORDER BY c.chunk_index;",
+        "options": {
+          "queryReplacement": "={{ [$json.sourceKey] }}"
+        }
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      }
+    },
+    {
+      "id": "0b769a98-48e5-58df-97e0-434c13307583",
+      "name": "Batch chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Group the document's chunks into LLM-sized batches. The first row tells us whether the document exists.\nconst req = $('Validate request').first().json;\nconst rows = $input.all().map((i) => i.json).filter((r) => r && r.document_id);\nif (!rows.length) return [{ json: { found: false } }];\n\nconst doc = { id: Number(rows[0].document_id), title: rows[0].title, kind: rows[0].kind, productTypes: rows[0].product_types || [], requirementIds: rows[0].requirement_ids || [] };\nconst batches = [];\nlet cur = null;\nfor (const r of rows.slice(0, req.maxChunks)) {\n  if (!cur || cur.text.length + r.content.length > req.config.maxChars) { cur = { text: '', pages: new Set() }; batches.push(cur); }\n  cur.text += (cur.text ? '\\n\\n' : '') + r.content;\n  if (r.page) cur.pages.add(r.page);\n}\nreturn batches.map((b, i) => ({ json: { found: true, doc, batch: i + 1, of: batches.length, pages: [...b.pages], text: b.text, chunksRead: Math.min(rows.length, req.maxChunks), chunksTotal: rows.length } }));\n"
+      }
+    },
+    {
+      "id": "e61033ce-bf1a-56f6-b9d0-55928c419743",
+      "name": "Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "291de499-ab6e-5380-a611-3156e3e3c7b3",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2f288bcd-3dec-5f2c-bea7-423d0b651421",
+      "name": "Respond 404",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        200
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ message: 'No document with that sourceKey. Upload it first.' }) }}",
+        "options": {
+          "responseCode": 404,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "91e9c04f-2427-5378-9366-bb1423cd6522",
+      "name": "Respond 202",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ status: 'started', sourceKey: $('Validate request').first().json.sourceKey, batches: $json.of, chunksRead: $json.chunksRead, chunksTotal: $json.chunksTotal, next: 'GET /webhook/ai/rules?status=proposed when it finishes' }) }}",
+        "options": {
+          "responseCode": 202,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "050e800e-c00f-53f6-90de-19c7f167b7e9",
+      "name": "Use OpenAI?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3394d674-9aa3-592f-8b9e-4b0c48424dcb",
+              "leftValue": "={{ $('Validate request').first().json.config.llmProvider === 'openai' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d4fe038d-9841-518e-bfcf-a971a0068e14",
+      "name": "Propose rules (OpenAI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        -100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 120000,
+          "batching": {
+            "batch": {
+              "batchSize": 4,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "airevOpenAi00001",
+          "name": "OpenAI account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "981c2426-89d4-571e-934c-9d9ff3dcc052",
+      "name": "Propose rules (Ollama)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate request').first().json.config.ollamaUrl }}/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 900000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 0
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a1469cdc-8596-5e42-af40-ad46d1726d7f",
+      "name": "Build prompts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// LLM request and response helpers, shared by every node that talks to the model.\n// OpenAI uses strict JSON-schema output; Ollama uses its \"format\" option.\nfunction strictSchema(s) {\n  // OpenAI strict mode: every object lists all its properties as required and allows no others.\n  if (s && s.type === 'object') return { ...s, additionalProperties: false, required: Object.keys(s.properties), properties: Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, strictSchema(v)])) };\n  if (s && s.type === 'array') return { ...s, items: strictSchema(s.items) };\n  return s;\n}\nfunction llmRequest(config, system, user, schema, name) {\n  const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];\n  if (config.llmProvider === 'openai') {\n    return { model: config.llmModel, temperature: 0, messages, response_format: { type: 'json_schema', json_schema: { name, strict: true, schema: strictSchema(schema) } } };\n  }\n  return { model: config.llmModel, stream: false, format: schema, options: { temperature: 0, num_ctx: 8192 }, messages };\n}\n// Returns { data, error, tokens } from either provider's response item.\nfunction llmResult(json) {\n  if (json.error) return { data: null, error: String(json.error.message || json.error), tokens: 0 };\n  const content = json.choices ? json.choices[0] && json.choices[0].message && json.choices[0].message.content : json.message && json.message.content;\n  const tokens = json.usage ? json.usage.total_tokens || 0 : (json.prompt_eval_count || 0) + (json.eval_count || 0);\n  try { return { data: JSON.parse(content || ''), error: null, tokens }; } catch (e) { return { data: null, error: 'Invalid JSON from the model', tokens }; }\n}\n\nconst req = $('Validate request').first().json;\nconst allowed = Object.entries(req.requirements).map(([id, name]) => `- ${id}: ${name}`).join('\\n');\n\nconst schema = {\n  type: 'object',\n  properties: {\n    rules: {\n      type: 'array',\n      items: {\n        type: 'object',\n        properties: {\n          text: { type: 'string' },\n          severity: { type: 'string', enum: ['critical', 'major', 'minor'] },\n          guidance: { type: 'string' },\n          requirementIds: { type: 'array', items: { type: 'string' } },\n          quote: { type: 'string' },\n        },\n        required: ['text', 'severity', 'guidance', 'requirementIds', 'quote'],\n      },\n    },\n  },\n  required: ['rules'],\n};\n\nconst common = `Each rule must be ONE checkable statement that a reviewer can mark pass or fail by reading the applicant's documents. Split compound requirements into separate rules.\nseverity: \"critical\" for identity, safety or legal validity; \"major\" for content the dossier must have; \"minor\" for presentation.\nguidance: one sentence telling the reviewer what is acceptable and what is not, or an empty string.\nrequirementIds: the documents where the reviewer should look, chosen ONLY from this list (empty list = the whole dossier):\n${allowed}\nquote: the sentence from the excerpt the rule comes from, copied word for word, at most 30 words.\nOnly use what the excerpt says. If it contains no requirement, return {\"rules\": []}. Respond with JSON only.`;\n\nconst system = {\n  guideline: `You turn regulatory guidance into review rules for Rwanda FDA product registration.\\nWrite each rule as a statement about the submission, e.g. \"The label states the storage temperature.\"\\n${common}`,\n  template: `The excerpt is a TEMPLATE that applicants must follow. List the mandatory sections, fields and statements a completed document must contain.\\nWrite each rule as \"The <document> contains <section, field or statement>.\"\\n${common}`,\n  reference: `You turn regulatory reference material into review rules for Rwanda FDA product registration.\\n${common}`,\n};\n\nreturn $input.all().map((item) => {\n  const b = item.json;\n  const scope = b.doc.requirementIds.length ? `This document applies to: ${b.doc.requirementIds.map((id) => req.requirements[id] || id).join('; ')}.` : '';\n  return {\n    json: {\n      ...b,\n      request: llmRequest(req.config, system[b.doc.kind] || system.guideline, `DOCUMENT: ${b.doc.title} (${b.doc.kind})\\n${scope}\\n\\nEXCERPT:\\n${b.text}`, schema, 'proposed_rules'),\n    },\n  };\n});\n"
+      }
+    },
+    {
+      "id": "fd2de5aa-60d8-5d3f-9ca4-18c4c0a597c8",
+      "name": "Check proposals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// LLM request and response helpers, shared by every node that talks to the model.\n// OpenAI uses strict JSON-schema output; Ollama uses its \"format\" option.\nfunction strictSchema(s) {\n  // OpenAI strict mode: every object lists all its properties as required and allows no others.\n  if (s && s.type === 'object') return { ...s, additionalProperties: false, required: Object.keys(s.properties), properties: Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, strictSchema(v)])) };\n  if (s && s.type === 'array') return { ...s, items: strictSchema(s.items) };\n  return s;\n}\nfunction llmRequest(config, system, user, schema, name) {\n  const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];\n  if (config.llmProvider === 'openai') {\n    return { model: config.llmModel, temperature: 0, messages, response_format: { type: 'json_schema', json_schema: { name, strict: true, schema: strictSchema(schema) } } };\n  }\n  return { model: config.llmModel, stream: false, format: schema, options: { temperature: 0, num_ctx: 8192 }, messages };\n}\n// Returns { data, error, tokens } from either provider's response item.\nfunction llmResult(json) {\n  if (json.error) return { data: null, error: String(json.error.message || json.error), tokens: 0 };\n  const content = json.choices ? json.choices[0] && json.choices[0].message && json.choices[0].message.content : json.message && json.message.content;\n  const tokens = json.usage ? json.usage.total_tokens || 0 : (json.prompt_eval_count || 0) + (json.eval_count || 0);\n  try { return { data: JSON.parse(content || ''), error: null, tokens }; } catch (e) { return { data: null, error: 'Invalid JSON from the model', tokens }; }\n}\n\n// Keep only rules whose quote really is in the excerpt, then store them as \"proposed\".\nconst req = $('Validate request').first().json;\nconst batches = $('Build prompts').all().map((i) => i.json);\nconst norm = (s) => String(s || '').toLowerCase().replace(/\\s+/g, ' ').trim();\nconst esc = (s) => \"'\" + String(s).replace(/\\u0000/g, '').replace(/'/g, \"''\") + \"'\";\nconst arr = (a) => `ARRAY[${a.map(esc).join(',')}]::text[]`;\n// Short stable hash so the same proposal from a re-run gets the same code (and is not duplicated).\nconst hash = (s) => { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36).toUpperCase().padStart(6, '0').slice(-6); };\n\nconst doc = batches[0].doc;\nconst kept = [], dropped = [];\n$input.all().forEach((item, i) => {\n  const b = batches[i];\n  const res = llmResult(item.json);\n  if (!res.data) dropped.push({ text: `(batch ${b.batch})`, reason: res.error });\n  const out = res.data;\n  for (const r of (out && Array.isArray(out.rules) ? out.rules : [])) {\n    const text = String(r.text || '').trim();\n    const severity = ['critical', 'major', 'minor'].includes(r.severity) ? r.severity : null;\n    if (text.length < 10 || text.length > 500 || !severity) { dropped.push({ text, reason: 'incomplete' }); continue; }\n    if (!norm(r.quote) || !norm(b.text).includes(norm(r.quote))) { dropped.push({ text, reason: 'quote not found in the document' }); continue; }\n    let ids = (Array.isArray(r.requirementIds) ? r.requirementIds : []).map(String).filter((id) => req.requirements[id]);\n    if (!ids.length) ids = doc.requirementIds;\n    const where = b.pages.length ? `, page ${b.pages.join('/')}` : '';\n    const guidance = [String(r.guidance || '').trim(), `Proposed from \"${doc.title}\"${where}: \"${String(r.quote).trim()}\"`].filter(Boolean).join(' ');\n    kept.push({ code: `P${doc.id}-${hash(norm(text))}`, text, severity, guidance, requirementIds: ids });\n  }\n});\nconst callErrors = dropped.filter((d) => d.text.startsWith('(batch '));\nif (callErrors.length === batches.length) throw new Error(`Every LLM call failed. First error: ${callErrors[0].reason}`);\nconst unique = [...new Map(kept.map((r) => [r.code, r])).values()];\nconst sql = unique.length\n  ? `INSERT INTO guideline_rules (rule_code, rule_text, severity, guidance, product_types, requirement_ids, status, source_document_id)\nVALUES ${unique.map((r) => `(${esc(r.code)}, ${esc(r.text)}, ${esc(r.severity)}, ${esc(r.guidance)}, ${arr(doc.productTypes)}, ${arr(r.requirementIds)}, 'proposed', ${doc.id})`).join(',\\n')}\nON CONFLICT (rule_code) DO NOTHING RETURNING rule_code;`\n  : 'SELECT NULL AS rule_code WHERE false;';\nreturn [{ json: { sql, proposed: unique.length, dropped } }];\n"
+      }
+    },
+    {
+      "id": "8b1f16df-ae32-5424-83f4-6de1d8a61266",
+      "name": "Save proposed rules",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook POST /ai/rules/propose": {
+      "main": [
+        [
+          {
+            "node": "Validate request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate request": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Load document",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load document": {
+      "main": [
+        [
+          {
+            "node": "Batch chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch chunks": {
+      "main": [
+        [
+          {
+            "node": "Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Found?": {
+      "main": [
+        [
+          {
+            "node": "Respond 202",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 404",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use OpenAI?": {
+      "main": [
+        [
+          {
+            "node": "Propose rules (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Propose rules (Ollama)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 202": {
+      "main": [
+        [
+          {
+            "node": "Build prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build prompts": {
+      "main": [
+        [
+          {
+            "node": "Use OpenAI?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Propose rules (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Check proposals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Propose rules (Ollama)": {
+      "main": [
+        [
+          {
+            "node": "Check proposals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check proposals": {
+      "main": [
+        [
+          {
+            "node": "Save proposed rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

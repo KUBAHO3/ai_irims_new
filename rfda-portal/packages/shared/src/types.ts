@@ -127,3 +127,47 @@ export interface TrackDto {
 }
 
 export type DecisionAction = 'pay-ok' | 'pay-bad' | 'accept' | 'query' | 'rec-approve' | 'rec-reject' | 'approve' | 'return' | 'reject';
+
+/* ---------------------------------------------------------------- AI review (n8n service) */
+export type AiFindingStatus = 'pass' | 'fail' | 'unclear' | 'not_applicable';
+
+export interface AiFinding {
+  ruleCode: string;
+  rule: string;
+  severity: 'critical' | 'major' | 'minor';
+  requirementIds: string[];
+  status: AiFindingStatus;
+  confidence: number;
+  explanation: string;
+  suggestion: string;
+  evidence: { chunkId: string; requirementId: string | null; document: string | null; page: number | null; quote: string; verified: boolean }[];
+  kbReferences: { id: string; title: string; sourceKey: string; kind: string; page: number | null }[];
+  checks: { parsed: boolean; notes: string[] };
+}
+
+/** The JSON the n8n "Analyze submission" workflow returns (see ai-review/GUIDE.md, step 8). */
+export interface AiResult {
+  analysisId: string;
+  status: 'completed';
+  overall: { verdict: 'compliant' | 'needs_review' | 'non_compliant'; counts: Record<string, number> };
+  summary: string;
+  findings: AiFinding[];
+  skipped: { ruleCode: string; rule: string; severity: string; requirementIds: string[]; reason: string }[];
+  documents: { requirementId: string; fileName: string; pages: number | null; characters: number; chunks: number; truncated: boolean; noText: boolean }[];
+  trace: Record<string, unknown>;
+}
+
+export interface AiAnalysisDto {
+  id: string;
+  status: 'requesting' | 'running' | 'completed' | 'failed';
+  stage: Stage;
+  verdict: AiResult['overall']['verdict'] | null;
+  summary: string | null;
+  error: string | null;
+  requestedBy: string;
+  createdAt: string;
+  finishedAt: string | null;
+  /** Files left out because the request would exceed the AI service's upload limit. */
+  notSent: { requirementId: string; fileName: string; size: number }[];
+  result: AiResult | null;
+}

@@ -1,0 +1,353 @@
+{
+  "id": "aiRevRulesApi001",
+  "name": "AI review - 2. Rules",
+  "nodes": [
+    {
+      "id": "6ef82a15-b0d3-511d-9717-86538be35fd0",
+      "name": "Webhook POST /ai/rules",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai/rules",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "723569a6-429e-59a1-894f-9a266f104124",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "airevApiKey00001",
+          "name": "AI review API key"
+        }
+      }
+    },
+    {
+      "id": "1985be36-4f06-527c-910f-d03d71338cdf",
+      "name": "Validate rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// POST /ai/rules: add or change rules. Send {\"rules\": [...]} or a plain array.\n// Full rule: {code, text, severity, guidance?, productTypes?, requirementIds?, status?}\n// Status only (e.g. approve a proposed rule): {code, status: \"active\"}\nconst PRODUCT_TYPES = ['HM', 'VM', 'PF', 'CO', 'MD'];\nconst STATUSES = ['proposed', 'active', 'retired'];\nconst SEVERITIES = ['critical', 'major', 'minor'];\n\nconst body = $input.first().json.body;\nconst rules = Array.isArray(body) ? body : (body && Array.isArray(body.rules) ? body.rules : null);\nconst errors = [];\nif (!rules || !rules.length) errors.push('Send {\"rules\": [...]} with at least one rule');\n\nconst esc = (s) => \"'\" + String(s).replace(/\\u0000/g, '').replace(/'/g, \"''\") + \"'\";\nconst arr = (a) => `ARRAY[${a.map(esc).join(',')}]::text[]`;\nconst list = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map((s) => String(s).trim()).filter(Boolean);\n\nconst full = [], statusOnly = [];\n(rules || []).forEach((r, i) => {\n  const at = `rules[${i}]`;\n  const code = String(r.code || '').trim();\n  if (!/^[A-Za-z0-9_.-]{1,40}$/.test(code)) { errors.push(`${at}: code is required (letters, digits, _ . -)`); return; }\n  const status = r.status === undefined ? undefined : String(r.status);\n  if (status !== undefined && !STATUSES.includes(status)) errors.push(`${code}: status must be ${STATUSES.join(', ')}`);\n  if (r.text === undefined) {\n    if (status === undefined) errors.push(`${code}: send \"text\" (to add or change the rule) or \"status\"`);\n    else statusOnly.push({ code, status });\n    return;\n  }\n  const text = String(r.text).trim();\n  if (text.length < 10) errors.push(`${code}: text is too short. Write one checkable statement.`);\n  const severity = String(r.severity || '').toLowerCase();\n  if (!SEVERITIES.includes(severity)) errors.push(`${code}: severity must be ${SEVERITIES.join(', ')}`);\n  const productTypes = list(r.productTypes).map((s) => s.toUpperCase());\n  productTypes.filter((t) => !PRODUCT_TYPES.includes(t)).forEach((t) => errors.push(`${code}: unknown product type \"${t}\"`));\n  const requirementIds = list(r.requirementIds).map((s) => s.toLowerCase());\n  requirementIds.filter((x) => !/^[a-z0-9-]{1,40}$/.test(x)).forEach((x) => errors.push(`${code}: invalid requirement id \"${x}\"`));\n  full.push({ code, text, severity, guidance: r.guidance ? String(r.guidance) : null, productTypes, requirementIds, status: status || 'active' });\n});\nif (errors.length) return [{ json: { valid: false, errors } }];\n\n// The version goes up whenever the wording changes, so each analysis records which wording it used.\nconst parts = [];\nif (full.length) parts.push(`up AS (\n  INSERT INTO guideline_rules (rule_code, rule_text, severity, guidance, product_types, requirement_ids, status)\n  VALUES ${full.map((r) => `(${esc(r.code)}, ${esc(r.text)}, ${esc(r.severity)}, ${r.guidance === null ? 'NULL' : esc(r.guidance)}, ${arr(r.productTypes)}, ${arr(r.requirementIds)}, ${esc(r.status)})`).join(',\\n  ')}\n  ON CONFLICT (rule_code) DO UPDATE SET rule_text = EXCLUDED.rule_text, severity = EXCLUDED.severity, guidance = EXCLUDED.guidance,\n    product_types = EXCLUDED.product_types, requirement_ids = EXCLUDED.requirement_ids, status = EXCLUDED.status,\n    version = guideline_rules.version + CASE WHEN guideline_rules.rule_text IS DISTINCT FROM EXCLUDED.rule_text\n      OR guideline_rules.guidance IS DISTINCT FROM EXCLUDED.guidance THEN 1 ELSE 0 END,\n    updated_at = now()\n  RETURNING rule_code, status, version\n)`);\nif (statusOnly.length) parts.push(`st AS (\n  UPDATE guideline_rules g SET status = v.status, updated_at = now()\n  FROM (VALUES ${statusOnly.map((r) => `(${esc(r.code)}, ${esc(r.status)})`).join(', ')}) AS v(code, status)\n  WHERE g.rule_code = v.code\n  RETURNING g.rule_code, g.status, g.version\n)`);\nconst sources = [full.length && 'SELECT * FROM up', statusOnly.length && 'SELECT * FROM st'].filter(Boolean).join(' UNION ALL ');\nconst sql = `WITH ${parts.join(', ')}\nSELECT COALESCE(json_agg(json_build_object('code', x.rule_code, 'status', x.status, 'version', x.version)), '[]'::json) AS saved\nFROM (${sources}) x;`;\nreturn [{ json: { valid: true, sql, requested: full.length + statusOnly.length, statusOnlyCodes: statusOnly.map((r) => r.code) } }];\n"
+      }
+    },
+    {
+      "id": "4ccbf18d-57d8-5ee6-a008-c507afeb7657",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3f1d0a14-3a52-5c05-bc7a-f00bcee1c907",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6cedfac9-aae7-5caa-9d2c-d8ae8a5e80b6",
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        200
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ message: 'Invalid request', errors: $json.errors }) }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "99876b55-14f0-51c8-b142-a47edc7d8dcd",
+      "name": "Save rules",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      }
+    },
+    {
+      "id": "92fb8b45-21ec-57f1-a6cb-357111685d6f",
+      "name": "Build response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const req = $('Validate rules').first().json;\nconst saved = $input.first().json.saved || [];\nconst found = new Set(saved.map((r) => r.code));\nconst notFound = req.statusOnlyCodes.filter((c) => !found.has(c));\nreturn [{ json: { code: notFound.length ? 207 : 200, body: { saved, notFound } } }];\n"
+      }
+    },
+    {
+      "id": "d7343c74-1765-5573-a350-730268c83ffc",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.code || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "286d74ce-40d9-5e8e-8881-6a91698c50f4",
+      "name": "Webhook GET /ai/rules",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "ai/rules",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "9cab2dcb-a0fe-57cd-996b-f3b761cc5ca2",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "airevApiKey00001",
+          "name": "AI review API key"
+        }
+      }
+    },
+    {
+      "id": "6c108ed2-004f-5adf-a5b5-39f232d81c7e",
+      "name": "Read filters",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "parameters": {
+        "jsCode": "// GET /ai/rules?status=proposed&productType=HM&requirementId=rra-gmp  (all filters optional)\nconst q = $input.first().json.query || {};\nconst status = ['proposed', 'active', 'retired'].includes(q.status) ? q.status : '';\nconst productType = /^[A-Z]{2}$/.test(String(q.productType || '').toUpperCase()) ? String(q.productType).toUpperCase() : '';\nconst requirementId = /^[a-z0-9-]{1,40}$/.test(String(q.requirementId || '')) ? q.requirementId : '';\nreturn [{ json: { params: [status, productType, requirementId] } }];\n"
+      }
+    },
+    {
+      "id": "c99b0ff8-9926-573b-903c-d90d50729ea8",
+      "name": "List rules",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        480,
+        400
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(json_agg(json_build_object(\n  'code', r.rule_code, 'text', r.rule_text, 'severity', r.severity, 'guidance', r.guidance, 'productTypes', r.product_types,\n  'requirementIds', r.requirement_ids, 'status', r.status, 'version', r.version, 'sourceDocument', d.source_key, 'updatedAt', r.updated_at\n) ORDER BY r.status, r.rule_code), '[]'::json) AS body\nFROM guideline_rules r LEFT JOIN kb_documents d ON d.id = r.source_document_id\nWHERE ($1 = '' OR r.status = $1)\n  AND ($2 = '' OR cardinality(r.product_types) = 0 OR $2 = ANY(r.product_types))\n  AND ($3 = '' OR cardinality(r.requirement_ids) = 0 OR $3 = ANY(r.requirement_ids));",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      }
+    },
+    {
+      "id": "0be08173-841a-5082-a47f-09b2cf9eefe0",
+      "name": "Respond with list",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        400
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.code || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook POST /ai/rules": {
+      "main": [
+        [
+          {
+            "node": "Validate rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate rules": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Save rules",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save rules": {
+      "main": [
+        [
+          {
+            "node": "Build response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook GET /ai/rules": {
+      "main": [
+        [
+          {
+            "node": "Read filters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read filters": {
+      "main": [
+        [
+          {
+            "node": "List rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List rules": {
+      "main": [
+        [
+          {
+            "node": "Respond with list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

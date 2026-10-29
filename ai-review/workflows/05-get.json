@@ -1,0 +1,135 @@
+{
+  "id": "aiRevGetResult01",
+  "name": "AI review - 5. Get analysis result",
+  "nodes": [
+    {
+      "id": "accb6b1d-9f13-525b-a782-4c02e6e3504c",
+      "name": "Webhook GET /ai/analyses",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "ai/analyses",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "d4c7aa03-a732-5b14-bfd6-fd4b7e8c895f",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "airevApiKey00001",
+          "name": "AI review API key"
+        }
+      }
+    },
+    {
+      "id": "93cf73d0-9fe5-51cf-aeba-d958080132b2",
+      "name": "Load analysis",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, status, application_ref, product_type, result, error, created_at, finished_at\nFROM analyses WHERE id::text = $1;",
+        "options": {
+          "queryReplacement": "={{ [String($json.query.id || '')] }}"
+        }
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      }
+    },
+    {
+      "id": "63784199-8005-5819-9907-96313b0ab45c",
+      "name": "Build response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const row = $input.first().json;\nif (!row || !row.id) return [{ json: { code: 404, body: { message: 'Analysis not found' } } }];\nconst body = row.result || { analysisId: row.id, status: row.status, applicationRef: row.application_ref, productType: row.product_type };\nif (row.status === 'failed') body.error = row.error;\nbody.createdAt = row.created_at;\nbody.finishedAt = row.finished_at;\nreturn [{ json: { code: 200, body } }];\n"
+      }
+    },
+    {
+      "id": "25abe15f-1b87-5307-9f03-21513c36aadb",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.code || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook GET /ai/analyses": {
+      "main": [
+        [
+          {
+            "node": "Load analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load analysis": {
+      "main": [
+        [
+          {
+            "node": "Build response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

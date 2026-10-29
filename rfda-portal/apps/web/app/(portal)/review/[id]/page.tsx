@@ -6,20 +6,27 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import useSWR from 'swr';
+import { AiFindings, AiSummary } from '@/components/AiReview';
 import { AppTab, Tabs, type TabKey } from '@/components/AppTabs';
-import { Icon } from '@/components/Icon';
 import { StatusBadge } from '@/components/journey';
 import { NotFound } from '@/components/NotFound';
 import { storeApp } from '@/components/session';
 import { useBusy, useToast } from '@/components/ui';
 import { api, fetcher, fileUrl } from '@/lib/api';
 
-const TABS: [TabKey, string][] = [['overview', 'Product details'], ['documents', 'Documents'], ['payment', 'Payment'], ['queries', 'Queries'], ['history', 'History']];
+const TABS: [TabKey, string][] = [['overview', 'Product details'], ['documents', 'Documents'], ['ai', 'AI review'], ['payment', 'Payment'], ['queries', 'Queries'], ['history', 'History']];
 
 export default function ReviewPage() {
   const { id } = useParams<{ id: string }>();
   const { data: app, error } = useSWR<ApplicationDto>(`/review/applications/${id}`, fetcher);
   const [tab, setTab] = useState<TabKey | null>(null);
+  // The decision comment lives here so AI suggestions from the "AI review" tab can be added to it.
+  const [comment, setComment] = useState('');
+  const toast = useToast();
+  const addSuggestion = (text: string) => {
+    setComment((c) => (c.trim() ? `${c.trim()}\n` : '') + `- ${text}`);
+    toast('Added to the comment. Review it, then raise the query.');
+  };
   if (error) return <NotFound back="/intray" />;
   if (!app) return <p className="loading">Loading…</p>;
   const current = tab || (app.stage === 'verification' ? 'payment' : app.stage === 'screening' ? 'documents' : 'overview');
@@ -39,18 +46,17 @@ export default function ReviewPage() {
         <div><dt>Applicant</dt><dd>{app.applicant}<div className="small muted" style={{ fontWeight: 400 }}>{app.applicantAddress}</div></dd></div>
       </dl></section>
       <div className="workspace">
-        <section className="panel"><Tabs tabs={TABS} tab={current} setTab={setTab} app={app} /><div className="panel-pad" role="tabpanel"><AppTab app={app} tab={current} role="fda" /></div></section>
-        <aside className="decision stack"><DecisionPanel app={app} /></aside>
+        <section className="panel"><Tabs tabs={TABS} tab={current} setTab={setTab} app={app} /><div className="panel-pad" role="tabpanel">{current === 'ai' ? <AiFindings app={app} onUseSuggestion={addSuggestion} /> : <AppTab app={app} tab={current} role="fda" />}</div></section>
+        <aside className="decision stack"><DecisionPanel app={app} comment={comment} setComment={setComment} openAi={() => setTab('ai')} /></aside>
       </div>
     </>
   );
 }
 
-function DecisionPanel({ app }: { app: ApplicationDto }) {
+function DecisionPanel({ app, comment, setComment, openAi }: { app: ApplicationDto; comment: string; setComment: (c: string) => void; openAi: () => void }) {
   const router = useRouter();
   const toast = useToast();
   const { busy, run } = useBusy();
-  const [comment, setComment] = useState('');
   const [findings, setFindings] = useState('');
   const [needComment, setNeedComment] = useState(false);
 
@@ -100,7 +106,7 @@ function DecisionPanel({ app }: { app: ApplicationDto }) {
       <div className="panel panel-pad stack"><h3>Screen for completeness</h3>
         <p className="small muted">Open and tick each document you’ve checked. Missing or unacceptable items go back to the applicant as one query.</p>
         <ScreeningChecklist app={app} />
-        <AiSlot stage="screening" />
+        <AiSummary app={app} onOpen={openAi} />
         {commentField}
         <button className="btn primary" disabled={busy} onClick={() => decide('accept')}>Accept for assessment</button>
         <button className="btn gold" disabled={busy} onClick={() => decide('query', true)}>Raise query to applicant</button>
@@ -110,7 +116,7 @@ function DecisionPanel({ app }: { app: ApplicationDto }) {
   if (app.stage === 'assessment') {
     return (
       <div className="panel panel-pad stack"><h3>Assessment</h3>
-        <AiSlot stage="assessment" />
+        <AiSummary app={app} onOpen={openAi} />
         <div className="field"><label htmlFor="dfind">Assessment findings</label>
           <textarea id="dfind" style={{ minHeight: 120 }} placeholder="Quality (Module 3), non-clinical (Module 4), clinical (Module 5), labelling. These become the assessment report." value={findings} onChange={(e) => setFindings(e.target.value)} /></div>
         {commentField}
@@ -170,15 +176,5 @@ function ScreeningChecklist({ app }: { app: ApplicationDto }) {
         </div>
       ))}
     </div>
-  );
-}
-
-function AiSlot({ stage }: { stage: 'screening' | 'assessment' }) {
-  return (
-    <div className="ai-slot"><div className="row"><span className="ai-tag"><Icon name="spark" /> AI assist</span><span className="small muted">Coming soon</span></div>
-      <p className="small" style={{ marginTop: 8 }}>{stage === 'screening'
-        ? 'Planned: checks that each uploaded file is the document it claims to be and is still valid, and drafts the query for anything missing.'
-        : 'Planned: evaluates the dossier and label against each guideline rule, with quoted evidence and page references. The assessor confirms or overrides every finding.'}</p>
-      <button className="btn small" style={{ marginTop: 10 }} disabled>Request AI analysis</button></div>
   );
 }

@@ -1,0 +1,4 @@
+# Secrets: never commit
+.env
+*.env.local.secret
+.DS_Store

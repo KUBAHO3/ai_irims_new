@@ -1,0 +1,452 @@
+{
+  "id": "aiRevKnowledge01",
+  "name": "AI review - 1. Knowledge base",
+  "nodes": [
+    {
+      "id": "f7fc92db-251f-5da3-8e45-0565cc640ce7",
+      "name": "Webhook POST /ai/kb/documents",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai/kb/documents",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "8a974ced-55bb-5322-a91f-4a98280de1e7",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "airevApiKey00001",
+          "name": "AI review API key"
+        }
+      }
+    },
+    {
+      "id": "889e3b46-e754-5428-b1a2-4f0fd387c29b",
+      "name": "Validate upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ---- Settings ---------------------------------------------------------------\nconst CONFIG = {\n  ollamaUrl: 'http://ollama:11434',\n  embedModel: 'bge-m3',   // 1024 dimensions: must match vector(1024) in the schema\n  chunkSize: 1200,        // characters per chunk\n  chunkOverlap: 200,\n  embedBatch: 32,         // chunks per embedding request\n};\nconst PRODUCT_TYPES = ['HM', 'VM', 'PF', 'CO', 'MD'];\nconst KINDS = ['guideline', 'template', 'reference'];\n// -----------------------------------------------------------------------------\n\nconst req = $input.first();\nconst body = req.json.body || {};\nconst errors = [];\nconst list = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map((s) => String(s).trim()).filter(Boolean);\n\nconst sourceKey = String(body.sourceKey || '').trim().toLowerCase();\nif (!/^[a-z0-9][a-z0-9_.-]{1,80}$/.test(sourceKey)) errors.push('sourceKey is required: a stable id such as \"rfda-labelling-guideline\" (a-z, 0-9, . _ -)');\nconst title = String(body.title || '').trim();\nif (!title) errors.push('title is required');\nconst kind = String(body.kind || 'guideline').trim().toLowerCase();\nif (!KINDS.includes(kind)) errors.push(`kind must be one of ${KINDS.join(', ')}`);\nconst productTypes = list(body.productTypes).map((s) => s.toUpperCase());\nproductTypes.filter((t) => !PRODUCT_TYPES.includes(t)).forEach((t) => errors.push(`Unknown product type \"${t}\"`));\nconst requirementIds = list(body.requirementIds).map((s) => s.toLowerCase());\nrequirementIds.filter((r) => !/^[a-z0-9-]{1,40}$/.test(r)).forEach((r) => errors.push(`Invalid requirement id \"${r}\"`));\nconst version = String(body.version || '1').trim().slice(0, 40);\n\nconst files = Object.entries(req.binary || {});\nif (files.length > 1) errors.push('Send one document per request');\nconst text = String(body.text || '').trim();\nif (!files.length && !text) errors.push('Send a file (field \"file\") or a \"text\" field');\n\nconst meta = { valid: !errors.length, errors, sourceKey, title, kind, productTypes, requirementIds, version, config: CONFIG };\nif (!meta.valid) return [{ json: meta }];\n\nif (files.length) {\n  const [, bin] = files[0];\n  return [{ json: { ...meta, fileName: bin.fileName || sourceKey }, binary: { data: bin } }];\n}\nreturn [{\n  json: { ...meta, fileName: sourceKey + '.txt' },\n  binary: { data: { data: Buffer.from(text, 'utf8').toString('base64'), mimeType: 'text/plain', fileName: sourceKey + '.txt' } },\n}];\n"
+      }
+    },
+    {
+      "id": "b0c00ac2-707a-58f7-b563-87036bd4fd87",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "decfc73e-59dc-5dcc-8b22-dbc6b642ca96",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "beaa13fc-e30f-59a2-a493-a956bec724e3",
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        200
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ message: 'Invalid request', errors: $json.errors }) }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "6ac96653-b73c-53f7-993b-a849aa8316da",
+      "name": "Extract text (Tika)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "http://tika:9998/tika/html",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "text/html"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "445e7236-35cf-59f0-8e0f-ff89661bb6bc",
+      "name": "Split into chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "jsCode": "function htmlToText(html) {\n  return String(html)\n    .replace(/<head[\\s\\S]*?<\\/head>/gi, '')\n    .replace(/<(script|style)[\\s\\S]*?<\\/\\1>/gi, '')\n    .replace(/<br\\s*\\/?>|<\\/(p|div|h[1-6]|li|tr)>/gi, '\\n')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\").replace(/&amp;/g, '&')\n    .replace(/[ \\t]+/g, ' ')\n    .replace(/ *\\n */g, '\\n')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\nfunction chunkText(text, size, overlap) {\n  const out = [];\n  let start = 0;\n  while (start < text.length) {\n    let end = Math.min(start + size, text.length);\n    if (end < text.length) {\n      const brk = Math.max(text.lastIndexOf('\\n', end), text.lastIndexOf('. ', end));\n      if (brk > start + size * 0.5) end = brk + 1;\n    }\n    const piece = text.slice(start, end).trim();\n    if (piece) out.push(piece);\n    if (end >= text.length) break;\n    start = Math.max(end - overlap, start + 1);\n  }\n  return out;\n}\n\n// Tika returns XHTML; PDFs come back with one <div class=\"page\"> per page.\nfunction splitPages(html) {\n  const parts = String(html).split(/<div class=\"page\">/i);\n  if (parts.length > 1) return parts.slice(1).map((p, i) => ({ page: i + 1, text: htmlToText(p) }));\n  return [{ page: null, text: htmlToText(html) }];\n}\n\nconst meta = $('Validate upload').first().json;\nconst cfg = meta.config;\n\nconst chunks = [];\nlet pages = 0;\nfor (const { page, text } of splitPages($input.first().json.data || '')) {\n  if (page) pages = page;\n  for (const piece of chunkText(text, cfg.chunkSize, cfg.chunkOverlap)) chunks.push({ page, chunkIndex: chunks.length, text: piece });\n}\nif (!chunks.length) throw new Error('No text could be extracted from the document (scanned file without OCR?)');\n\n// One item per batch of chunks, so large documents are embedded in several requests.\nconst out = [];\nfor (let i = 0; i < chunks.length; i += cfg.embedBatch) {\n  out.push({ json: { model: cfg.embedModel, input: chunks.slice(i, i + cfg.embedBatch).map((c) => c.text), ...(i === 0 ? { chunks, pages } : {}) } });\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "c9ce357c-4242-563d-a83e-77275a088dde",
+      "name": "Embed chunks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Validate upload').first().json.config.ollamaUrl }}/api/embed",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.model, input: $json.input }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      }
+    },
+    {
+      "id": "4ee03c7a-11a2-5f86-a3d2-db5819a94b96",
+      "name": "Build SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Upsert the document by sourceKey and replace all its chunks, in one statement.\nconst meta = $('Validate upload').first().json;\nconst { chunks, pages } = $('Split into chunks').first().json;\nconst vecs = $input.all().flatMap((i) => i.json.embeddings);\nif (vecs.length !== chunks.length) throw new Error(`Got ${vecs.length} embeddings for ${chunks.length} chunks`);\n\nconst esc = (s) => \"'\" + String(s).replace(/\\u0000/g, '').replace(/'/g, \"''\") + \"'\";\nconst arr = (a) => `ARRAY[${a.map(esc).join(',')}]::text[]`;\n\nconst values = chunks.map((c, i) => `(${Number.isInteger(c.page) ? c.page : 'NULL'}, ${c.chunkIndex}, ${esc(c.text)}, '[${vecs[i].join(',')}]')`);\nconst sql = `WITH doc AS (\n  INSERT INTO kb_documents (source_key, title, kind, product_types, requirement_ids, version, file_name, pages, active, updated_at)\n  VALUES (${esc(meta.sourceKey)}, ${esc(meta.title)}, ${esc(meta.kind)}, ${arr(meta.productTypes)}, ${arr(meta.requirementIds)}, ${esc(meta.version)}, ${esc(meta.fileName)}, ${pages || 'NULL'}, true, now())\n  ON CONFLICT (source_key) DO UPDATE SET title = EXCLUDED.title, kind = EXCLUDED.kind, product_types = EXCLUDED.product_types,\n    requirement_ids = EXCLUDED.requirement_ids, version = EXCLUDED.version, file_name = EXCLUDED.file_name, pages = EXCLUDED.pages,\n    active = true, updated_at = now()\n  RETURNING id, (xmax <> 0) AS replaced\n), del AS (\n  DELETE FROM kb_chunks WHERE document_id = (SELECT id FROM doc) RETURNING 1\n), ins AS (\n  INSERT INTO kb_chunks (document_id, page, chunk_index, content, embedding)\n  SELECT (SELECT id FROM doc), v.page::int, v.idx::int, v.content, v.emb::vector\n  FROM (VALUES ${values.join(',\\n  ')}) AS v(page, idx, content, emb)\n  RETURNING 1\n)\nSELECT (SELECT id FROM doc) AS \"documentId\", (SELECT replaced FROM doc) AS replaced,\n       (SELECT count(*) FROM del)::int AS \"chunksRemoved\", (SELECT count(*) FROM ins)::int AS \"chunksStored\";`;\n\nreturn [{ json: { sql } }];\n"
+      }
+    },
+    {
+      "id": "0a17b6f6-bd20-5aa1-a450-12732ace911e",
+      "name": "Store in knowledge base",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      }
+    },
+    {
+      "id": "38b5420c-a912-5060-bedd-d3b67c3754b8",
+      "name": "Build response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const meta = $('Validate upload').first().json;\nconst r = $input.first().json;\nreturn [{ json: { body: {\n  status: 'stored', documentId: Number(r.documentId), sourceKey: meta.sourceKey, title: meta.title, kind: meta.kind,\n  productTypes: meta.productTypes, requirementIds: meta.requirementIds, version: meta.version,\n  pages: $('Split into chunks').first().json.pages || null, chunksStored: r.chunksStored, replacedPreviousVersion: r.replaced,\n} } }];\n"
+      }
+    },
+    {
+      "id": "50d79f39-3a94-563d-9411-04aad34b0a74",
+      "name": "Respond 201",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": 201,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "47a55b5b-f7d5-5686-8e61-f65b60d31331",
+      "name": "Webhook GET /ai/kb/documents",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "ai/kb/documents",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "4656e373-2ac9-5eb0-8e36-51eb405830cd",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "airevApiKey00001",
+          "name": "AI review API key"
+        }
+      }
+    },
+    {
+      "id": "d722dbe9-5b42-5371-90d4-c89e73ea3d42",
+      "name": "List documents",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        240,
+        400
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(json_agg(json_build_object(\n  'documentId', d.id, 'sourceKey', d.source_key, 'title', d.title, 'kind', d.kind, 'productTypes', d.product_types,\n  'requirementIds', d.requirement_ids, 'version', d.version, 'fileName', d.file_name, 'pages', d.pages, 'active', d.active,\n  'chunks', (SELECT count(*) FROM kb_chunks c WHERE c.document_id = d.id), 'updatedAt', d.updated_at) ORDER BY d.title), '[]'::json) AS body\nFROM kb_documents d;",
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      }
+    },
+    {
+      "id": "7967dfce-87a0-5781-b53b-7803215581b9",
+      "name": "Respond with list",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        400
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.code || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook POST /ai/kb/documents": {
+      "main": [
+        [
+          {
+            "node": "Validate upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate upload": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Extract text (Tika)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract text (Tika)": {
+      "main": [
+        [
+          {
+            "node": "Split into chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split into chunks": {
+      "main": [
+        [
+          {
+            "node": "Embed chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed chunks": {
+      "main": [
+        [
+          {
+            "node": "Build SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build SQL": {
+      "main": [
+        [
+          {
+            "node": "Store in knowledge base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in knowledge base": {
+      "main": [
+        [
+          {
+            "node": "Build response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build response": {
+      "main": [
+        [
+          {
+            "node": "Respond 201",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook GET /ai/kb/documents": {
+      "main": [
+        [
+          {
+            "node": "List documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List documents": {
+      "main": [
+        [
+          {
+            "node": "Respond with list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

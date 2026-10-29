@@ -1,0 +1,150 @@
+{
+  "id": "aiRevErrors00001",
+  "name": "AI review - 6. Analysis failures",
+  "nodes": [
+    {
+      "id": "7838e9db-0a27-5364-b9d9-7b18a3f8d412",
+      "name": "When an analysis fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "4c594c34-1303-5c3b-a217-2376ac6169c5",
+      "name": "Mark analysis failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE analyses SET status = 'failed', error = $1, finished_at = now()\nWHERE execution_id = $2 AND status = 'running'\nRETURNING id, COALESCE(callback_url, '') AS callback_url, application_ref, product_type, error;",
+        "options": {
+          "queryReplacement": "={{ [($json.execution.lastNodeExecuted ? $json.execution.lastNodeExecuted + ': ' : '') + ($json.execution.error && $json.execution.error.message || 'Unknown error'), String($json.execution.id)] }}"
+        }
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "airevPostgres001",
+          "name": "AI review database"
+        }
+      }
+    },
+    {
+      "id": "db9a68fb-60f7-52d3-a622-c4c102657577",
+      "name": "Callback URL given?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b153dfd2-abdb-53b5-bb4c-bbcb50b5464e",
+              "leftValue": "={{ !!$json.id && $json.callback_url !== '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "937f5795-9a8b-548c-a7cf-b4be615cbde8",
+      "name": "Tell the portal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.callback_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ analysisId: $json.id, status: 'failed', applicationRef: $json.application_ref, productType: $json.product_type, error: $json.error }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "airevCallback001",
+          "name": "Portal callback key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "When an analysis fails": {
+      "main": [
+        [
+          {
+            "node": "Mark analysis failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark analysis failed": {
+      "main": [
+        [
+          {
+            "node": "Callback URL given?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback URL given?": {
+      "main": [
+        [
+          {
+            "node": "Tell the portal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

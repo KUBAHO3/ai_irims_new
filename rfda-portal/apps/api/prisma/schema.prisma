@@ -65,6 +65,7 @@ model User {
   createdAt    DateTime      @default(now())
   applications Application[]
   files        StoredFile[]
+  aiAnalyses   AiAnalysis[]
 }
 
 model Application {
@@ -116,6 +117,7 @@ model Application {
   queries          Query[]
   history          HistoryEvent[]
   checks           DocumentCheck[]
+  aiAnalyses       AiAnalysis[]
 
   @@index([ownerId])
   @@index([status, stage])
@@ -209,4 +211,30 @@ model HelpdeskTicket {
   userId    String?
   email     String?
   createdAt DateTime @default(now())
+}
+
+/// One AI review request sent to the n8n service, and what came back.
+model AiAnalysis {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  /// The n8n service's analysis id, set once it accepts the request.
+  externalId    String?     @unique
+  /// requesting | running | completed | failed
+  status        String
+  /// Who it is for: "assessor" (internal review) or "applicant" (pre-check). Each sees only their own.
+  audience      String      @default("assessor")
+  stage         Stage
+  verdict       String?
+  summary       String?
+  result        Json?
+  error         String?
+  /// Files left out because of the service's upload limit.
+  notSent       Json        @default("[]")
+  requestedById String
+  requestedBy   User        @relation(fields: [requestedById], references: [id])
+  createdAt     DateTime    @default(now())
+  finishedAt    DateTime?
+
+  @@index([applicationId, audience, createdAt])
 }

@@ -1,0 +1,57 @@
+# Prototype stack: n8n + Postgres/pgvector + Ollama + Apache Tika
+# Pin image versions before using this beyond a prototype.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aipoc
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: aipoc
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5433:5432"  # optional, for inspecting data with psql/DBeaver
+
+  ollama:
+    image: ollama/ollama
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434" # optional
+    # Uncomment if the host has an NVIDIA GPU + nvidia-container-toolkit
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  tika:
+    image: apache/tika:latest-full   # "full" includes Tesseract for OCR
+    restart: unless-stopped
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      GENERIC_TIMEZONE: Africa/Kigali
+      TZ: Africa/Kigali
+      N8N_SECURE_COOKIE: "false"     # prototype over plain HTTP only
+      N8N_PAYLOAD_SIZE_MAX: "64"     # MB, allows larger uploads
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - postgres
+      - ollama
+      - tika
+
+volumes:
+  pgdata:
+  ollama:
+  n8n_data:

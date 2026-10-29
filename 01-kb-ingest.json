@@ -1,0 +1,233 @@
+{
+  "name": "AI POC - 1. Knowledge base ingest",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kb-ingest",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "7f33a86c-bdcf-4c14-acc5-aa7eb160965c",
+      "name": "Webhook /kb-ingest",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "8f059c82-771d-4aab-b4bd-cd80139880a8"
+    },
+    {
+      "parameters": {
+        "jsCode": "const CONFIG = {\n  ollamaUrl: 'http://ollama:11434',\n  embedModel: 'bge-m3',\n  chunkSize: 1200,\n  chunkOverlap: 200,\n};\n\nconst req = $input.first();\nconst body = req.json.body || {};\nconst items = [];\n\nfor (const [key, bin] of Object.entries(req.binary || {})) {\n  const fileName = bin.fileName || key;\n  items.push({ json: { source: body.source || fileName, fileName, config: CONFIG }, binary: { data: bin } });\n}\nif (body.text) {\n  const source = body.source || 'inline-text';\n  items.push({\n    json: { source, fileName: source, config: CONFIG },\n    binary: {\n      data: {\n        data: Buffer.from(String(body.text), 'utf8').toString('base64'),\n        mimeType: 'text/plain',\n        fileName: source + '.txt',\n      },\n    },\n  });\n}\nif (!items.length) throw new Error('Send at least one file or a \"text\" field');\nreturn items;\n"
+      },
+      "id": "e6a73f80-23fa-4c49-aa61-83bb4483b7e1",
+      "name": "Prepare upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://tika:9998/tika",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "text/html"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "22d9bed4-2789-4bf8-b504-4609db506cb1",
+      "name": "Extract text (Tika)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function htmlToText(html) {\n  return String(html)\n    .replace(/<head[\\s\\S]*?<\\/head>/gi, '')\n    .replace(/<(script|style)[\\s\\S]*?<\\/\\1>/gi, '')\n    .replace(/<br\\s*\\/?>|<\\/(p|div|h[1-6]|li|tr)>/gi, '\\n')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\").replace(/&amp;/g, '&')\n    .replace(/[ \\t]+/g, ' ')\n    .replace(/ *\\n */g, '\\n')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\nfunction chunkText(text, size, overlap) {\n  const out = [];\n  let start = 0;\n  while (start < text.length) {\n    let end = Math.min(start + size, text.length);\n    if (end < text.length) {\n      const brk = Math.max(text.lastIndexOf('\\n', end), text.lastIndexOf('. ', end));\n      if (brk > start + size * 0.5) end = brk + 1;\n    }\n    const piece = text.slice(start, end).trim();\n    if (piece) out.push(piece);\n    if (end >= text.length) break;\n    start = Math.max(end - overlap, start + 1);\n  }\n  return out;\n}\n\n// Tika returns XHTML; PDFs come back with one <div class=\"page\"> per page.\nfunction splitPages(html) {\n  const parts = String(html).split(/<div class=\"page\">/i);\n  if (parts.length > 1) return parts.slice(1).map((p, i) => ({ page: i + 1, text: htmlToText(p) }));\n  return [{ page: null, text: htmlToText(html) }];\n}\n\nconst prepared = $('Prepare upload').all();\nconst cfg = prepared[0].json.config;\n\nconst chunks = [];\n$input.all().forEach((item, i) => {\n  const source = prepared[i].json.source;\n  let chunkIndex = 0;\n  for (const { page, text } of splitPages(item.json.data || '')) {\n    for (const piece of chunkText(text, cfg.chunkSize, cfg.chunkOverlap)) {\n      chunks.push({ source, page, chunkIndex: chunkIndex++, text: piece });\n    }\n  }\n});\nif (!chunks.length) throw new Error('No text could be extracted (scanned file without OCR?)');\nreturn [{ json: { chunks, embedModel: cfg.embedModel } }];\n"
+      },
+      "id": "d9595e76-bd46-425a-8b3e-a635a581f254",
+      "name": "Split into chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Prepare upload').first().json.config.ollamaUrl }}/api/embed",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.embedModel, input: $json.chunks.map(c => c.text) }) }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "e31f44b2-68f4-4809-9b71-652370ea3783",
+      "name": "Embed chunks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Re-ingesting a source replaces its previous chunks (single statement).\nconst chunks = $('Split into chunks').first().json.chunks;\nconst vecs = $input.first().json.embeddings;\nconst esc = s => \"'\" + String(s).replace(/\\u0000/g, '').replace(/'/g, \"''\") + \"'\";\n\nconst sources = [...new Set(chunks.map(c => c.source))];\nconst values = chunks.map((c, i) =>\n  `(${esc(c.source)}, ${Number.isInteger(c.page) ? c.page : 'NULL'}, ${c.chunkIndex}, ${esc(c.text)}, '[${vecs[i].join(',')}]'::vector)`\n);\n\nconst sql = `WITH del AS (\n  DELETE FROM kb_chunks WHERE source IN (${sources.map(esc).join(', ')}) RETURNING 1\n), ins AS (\n  INSERT INTO kb_chunks (source, page, chunk_index, content, embedding) VALUES\n  ${values.join(',\\n  ')}\n  RETURNING 1\n)\nSELECT (SELECT count(*) FROM del) AS deleted, (SELECT count(*) FROM ins) AS inserted;`;\n\nreturn [{ json: { sql, sources } }];\n"
+      },
+      "id": "1d52121c-f158-45c3-955c-67b836c134e0",
+      "name": "Build SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "id": "81243597-130f-4674-ae30-f52e7af3b402",
+      "name": "Store in knowledge base",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', sources: $('Build SQL').first().json.sources, deleted: Number($json.deleted), inserted: Number($json.inserted) }) }}",
+        "options": {}
+      },
+      "id": "585281ff-d849-4e21-bc2f-6c89a2b127cf",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook /kb-ingest": {
+      "main": [
+        [
+          {
+            "node": "Prepare upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare upload": {
+      "main": [
+        [
+          {
+            "node": "Extract text (Tika)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract text (Tika)": {
+      "main": [
+        [
+          {
+            "node": "Split into chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split into chunks": {
+      "main": [
+        [
+          {
+            "node": "Embed chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed chunks": {
+      "main": [
+        [
+          {
+            "node": "Build SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build SQL": {
+      "main": [
+        [
+          {
+            "node": "Store in knowledge base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in knowledge base": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

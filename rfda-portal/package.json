@@ -1,0 +1,15 @@
+{
+  "name": "rfda-portal",
+  "private": true,
+  "packageManager": "pnpm@12.15.0",
+  "scripts": {
+    "build:shared": "pnpm --filter @rfda/shared build",
+    "db:up": "docker compose up -d postgres",
+    "db:migrate": "pnpm --filter @rfda/api prisma:migrate",
+    "db:seed": "pnpm --filter @rfda/api seed",
+    "db:reset": "pnpm --filter @rfda/api db:reset",
+    "dev": "pnpm build:shared && pnpm -r --parallel --filter @rfda/api --filter @rfda/web dev",
+    "build": "pnpm build:shared && pnpm --filter @rfda/api build && pnpm --filter @rfda/web build",
+    "typecheck": "pnpm build:shared && pnpm -r typecheck"
+  }
+}

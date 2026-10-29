@@ -1,0 +1,23 @@
+APPLICATION FOR REGISTRATION OF A MEDICINAL PRODUCT (sample for prototype testing only)
+
+Part A. Applicant
+Applicant company: Imaginary Pharma Ltd
+Address: P.O. Box 1234, Kigali
+
+Part B. Product
+Product name: Paracetamol 500 mg film-coated tablets
+Pack size: 10 x 10 tablets
+
+Part C. Manufacturer
+Manufacturer: Example Manufacturing Co., Plot 7 Industrial Zone, Nairobi, Kenya
+GMP certificate no. GMP-2023-0457, valid until 31 March 2025.
+
+Part D. Proposed label text
+PARACETAMOL 500 mg tablets. Each tablet contains paracetamol 500 mg.
+Dosage: adults 1-2 tablets every 4-6 hours. Do not exceed 8 tablets in 24 hours.
+Keep out of reach of children. Store in a cool, dry place.
+EXP: MM/YYYY   Batch: XXXXX
+
+Part E. Quality
+Certificate of analysis for batch PCT-2406 attached (Annex 3): assay 99.2% (spec 95.0-105.0%),
+dissolution complies, related substances comply.

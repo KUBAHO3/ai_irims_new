@@ -1,0 +1,436 @@
+{
+  "name": "AI POC - 2. Analyze submission",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyze",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "76c1ca8f-b04f-41fa-9475-e009836f0772",
+      "name": "Webhook /analyze",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "74b9cc55-e3aa-4ad2-a215-cc7a7fa4e97d"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ---- Settings for the prototype -------------------------------------------\nconst CONFIG = {\n  ollamaUrl: 'http://ollama:11434',\n  embedModel: 'bge-m3',      // 1024-dim; must match vector(1024) in the schema\n  llmModel: 'qwen2.5:7b',    // any Ollama model that handles JSON well\n  topKEvidence: 5,           // submission chunks given to the LLM per rule\n  topKKb: 3,                 // knowledge-base chunks given to the LLM per rule\n  chunkSize: 1200,           // characters\n  chunkOverlap: 200,\n};\n// ---------------------------------------------------------------------------\n\nconst req = $input.first();\nconst body = req.json.body || {};\n\nconst setCode = String(body.guidelineSet || '').trim();\nif (!/^[A-Za-z0-9_-]{1,64}$/.test(setCode)) {\n  throw new Error('\"guidelineSet\" is required (letters, digits, - or _ only)');\n}\nconst output = String(body.output || 'json').toLowerCase() === 'text' ? 'text' : 'json';\n\nlet fields = body.fields || {};\nif (typeof fields === 'string') {\n  try { fields = JSON.parse(fields); } catch (e) { fields = { fields }; }\n}\n\nconst meta = { setCode, output, fields, config: CONFIG };\nconst items = [];\n\n// Free text and structured fields are analysed as a virtual document.\nconst inline = [];\nif (body.text) inline.push(String(body.text));\nconst fieldLines = Object.entries(fields).map(\n  ([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`\n);\nif (fieldLines.length) inline.push('Submission fields:\\n' + fieldLines.join('\\n'));\nif (inline.length) {\n  const txt = inline.join('\\n\\n');\n  items.push({\n    json: { ...meta, fileName: 'inline-submission.txt' },\n    binary: {\n      data: {\n        data: Buffer.from(txt, 'utf8').toString('base64'),\n        mimeType: 'text/plain',\n        fileName: 'inline-submission.txt',\n      },\n    },\n  });\n}\n\n// One item per uploaded file, whatever the multipart field names were.\nfor (const [key, bin] of Object.entries(req.binary || {})) {\n  items.push({ json: { ...meta, fileName: bin.fileName || key }, binary: { data: bin } });\n}\n\nif (!items.length) throw new Error('Send at least one file or a \"text\" field');\nreturn items;\n"
+      },
+      "id": "b0ed3af7-d76f-48b7-a2d7-6156bb19da41",
+      "name": "Prepare request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://tika:9998/tika",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "text/html"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "90b1d1fe-f8c8-4178-bf10-75a02e785967",
+      "name": "Extract text (Tika)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function htmlToText(html) {\n  return String(html)\n    .replace(/<head[\\s\\S]*?<\\/head>/gi, '')\n    .replace(/<(script|style)[\\s\\S]*?<\\/\\1>/gi, '')\n    .replace(/<br\\s*\\/?>|<\\/(p|div|h[1-6]|li|tr)>/gi, '\\n')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\").replace(/&amp;/g, '&')\n    .replace(/[ \\t]+/g, ' ')\n    .replace(/ *\\n */g, '\\n')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\nfunction chunkText(text, size, overlap) {\n  const out = [];\n  let start = 0;\n  while (start < text.length) {\n    let end = Math.min(start + size, text.length);\n    if (end < text.length) {\n      const brk = Math.max(text.lastIndexOf('\\n', end), text.lastIndexOf('. ', end));\n      if (brk > start + size * 0.5) end = brk + 1;\n    }\n    const piece = text.slice(start, end).trim();\n    if (piece) out.push(piece);\n    if (end >= text.length) break;\n    start = Math.max(end - overlap, start + 1);\n  }\n  return out;\n}\n\n// Tika returns XHTML; PDFs come back with one <div class=\"page\"> per page.\nfunction splitPages(html) {\n  const parts = String(html).split(/<div class=\"page\">/i);\n  if (parts.length > 1) return parts.slice(1).map((p, i) => ({ page: i + 1, text: htmlToText(p) }));\n  return [{ page: null, text: htmlToText(html) }];\n}\n\nconst prepared = $('Prepare request').all();\nconst cfg = prepared[0].json.config;\n\nconst chunks = [];\n$input.all().forEach((item, i) => {\n  const fileName = prepared[i].json.fileName;\n  for (const { page, text } of splitPages(item.json.data || '')) {\n    for (const piece of chunkText(text, cfg.chunkSize, cfg.chunkOverlap)) {\n      chunks.push({ id: 'S' + (chunks.length + 1), file: fileName, page, text: piece });\n    }\n  }\n});\n\nif (!chunks.length) {\n  throw new Error('No text could be extracted from the submission (scanned file without OCR?)');\n}\nreturn [{ json: { chunks, embedModel: cfg.embedModel } }];\n"
+      },
+      "id": "e7190607-7a6a-4bcb-9242-7d07c70e0f4d",
+      "name": "Split into chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Prepare request').first().json.config.ollamaUrl }}/api/embed",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.embedModel, input: $json.chunks.map(c => c.text) }) }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "3db36036-8281-48d7-a4f5-cd808fcde954",
+      "name": "Embed submission",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT rule_code, rule_text, severity, COALESCE(guidance, '') AS guidance\nFROM guideline_rules\nWHERE set_code = '{{ $('Prepare request').first().json.setCode }}' AND active\nORDER BY rule_code;",
+        "options": {}
+      },
+      "id": "a4bd1f16-b959-4f54-b58d-b703a7931827",
+      "name": "Load rules",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1200,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('Prepare request').first().json;\nconst rules = $input.all().map(i => i.json).filter(r => r && r.rule_code);\n\nif (!rules.length) {\n  throw new Error(`No active rules found for guideline set \"${req.setCode}\"`);\n}\nfor (const r of rules) {\n  if (!/^[A-Za-z0-9_.-]+$/.test(r.rule_code)) throw new Error('Invalid rule_code: ' + r.rule_code);\n}\nreturn [{ json: { rules, embedModel: req.config.embedModel } }];\n"
+      },
+      "id": "b5aca9f4-8819-4e54-aac4-5cf555bc329d",
+      "name": "Check rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Prepare request').first().json.config.ollamaUrl }}/api/embed",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.embedModel, input: $json.rules.map(r => r.rule_text + (r.guidance ? '\\n' + r.guidance : '')) }) }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "c634fdf3-e92f-4989-b791-66e63ac67aa7",
+      "name": "Embed rules",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function cosine(a, b) {\n  let dot = 0, na = 0, nb = 0;\n  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }\n  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);\n}\n\nconst cfg = $('Prepare request').first().json.config;\nconst chunks = $('Split into chunks').first().json.chunks;\nconst chunkVecs = $('Embed submission').first().json.embeddings;\nconst rules = $('Check rules').first().json.rules;\nconst ruleVecs = $input.first().json.embeddings;\n\n// One output item per rule = one LLM evaluation per rule (the \"map\" step).\nreturn rules.map((r, i) => {\n  const evidence = chunks\n    .map((c, j) => ({ ...c, score: Math.round(cosine(ruleVecs[i], chunkVecs[j]) * 1000) / 1000 }))\n    .sort((a, b) => b.score - a.score)\n    .slice(0, cfg.topKEvidence);\n  return {\n    json: {\n      ruleCode: r.rule_code,\n      ruleText: r.rule_text,\n      severity: r.severity,\n      guidance: r.guidance,\n      evidence,\n      ruleVec: '[' + ruleVecs[i].join(',') + ']',\n    },\n  };\n});\n"
+      },
+      "id": "c11b85b1-ed20-470d-9306-53792a861026",
+      "name": "Select evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=WITH q AS (SELECT '{{ $json.ruleVec }}'::vector AS v)\nSELECT '{{ $json.ruleCode }}' AS rule_code,\n       COALESCE(json_agg(t ORDER BY t.distance), '[]'::json) AS kb\nFROM (\n  SELECT 'K' || k.id AS id, k.source, k.page, k.content AS text,\n         round((k.embedding <=> q.v)::numeric, 4) AS distance\n  FROM kb_chunks k, q\n  ORDER BY k.embedding <=> q.v\n  LIMIT {{ $('Prepare request').first().json.config.topKKb }}\n) t;",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "id": "d3e8bc6e-a47f-4f90-a325-544bf265cd3e",
+      "name": "Search knowledge base",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        240,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Prepare request').first().json.config;\nconst selected = $('Select evidence').all().map(i => i.json);\n\nconst schema = {\n  type: 'object',\n  properties: {\n    status: { type: 'string', enum: ['pass', 'fail', 'unclear', 'not_applicable'] },\n    confidence: { type: 'number' },\n    explanation: { type: 'string' },\n    evidence: {\n      type: 'array',\n      items: {\n        type: 'object',\n        properties: { chunkId: { type: 'string' }, quote: { type: 'string' } },\n        required: ['chunkId', 'quote'],\n      },\n    },\n    kbReferences: { type: 'array', items: { type: 'string' } },\n  },\n  required: ['status', 'confidence', 'explanation', 'evidence', 'kbReferences'],\n};\n\nconst system = `You are a meticulous regulatory reviewer. You evaluate ONE rule at a time against excerpts from an applicant's submission.\n\nDecide the status:\n- \"pass\": the SUBMISSION EXCERPTS clearly show the rule is met.\n- \"fail\": the SUBMISSION EXCERPTS clearly show the rule is not met, or contain something that contradicts it.\n- \"unclear\": the excerpts do not contain enough information to decide. The excerpts are only part of the submission, so missing information means \"unclear\", not \"fail\".\n- \"not_applicable\": the excerpts show the rule does not apply to this submission.\n\nRules for your answer:\n- Base the decision only on the SUBMISSION EXCERPTS. KNOWLEDGE BASE REFERENCES explain how to interpret the rule; they are never evidence that the submission complies.\n- For \"pass\" or \"fail\", add evidence items. chunkId must be an S-id shown in the excerpts. quote must be copied word for word from that excerpt, at most 30 words.\n- kbReferences: the K-ids you relied on, or an empty list.\n- explanation: 1 to 3 plain sentences a human reviewer can check.\n- confidence: a number between 0 and 1.\nRespond with JSON only.`;\n\nreturn $input.all().map(item => {\n  const row = item.json;\n  const r = selected.find(s => s.ruleCode === row.rule_code);\n  const kb = Array.isArray(row.kb) ? row.kb : (typeof row.kb === 'string' ? JSON.parse(row.kb) : []);\n\n  const where = (name, page) => `${name}${page ? ', page ' + page : ''}`;\n  const kbText = kb.length\n    ? kb.map(k => `[${k.id}] (${where(k.source, k.page)})\\n${k.text}`).join('\\n\\n')\n    : '(none)';\n  const evText = r.evidence.map(e => `[${e.id}] (${where(e.file, e.page)})\\n${e.text}`).join('\\n\\n');\n\n  const user = [\n    `RULE ${r.ruleCode} (severity: ${r.severity})`,\n    r.ruleText,\n    r.guidance ? `Reviewer guidance: ${r.guidance}` : '',\n    '',\n    'KNOWLEDGE BASE REFERENCES:',\n    kbText,\n    '',\n    'SUBMISSION EXCERPTS:',\n    evText,\n  ].join('\\n');\n\n  return {\n    json: {\n      ruleCode: r.ruleCode,\n      ruleText: r.ruleText,\n      severity: r.severity,\n      evidence: r.evidence,\n      kb: kb.map(({ id, source, page }) => ({ id, source, page })),\n      request: {\n        model: cfg.llmModel,\n        stream: false,\n        format: schema,\n        options: { temperature: 0, num_ctx: 8192 },\n        messages: [\n          { role: 'system', content: system },\n          { role: 'user', content: user },\n        ],\n      },\n    },\n  };\n});\n"
+      },
+      "id": "4a8e0282-f75e-4fa2-9e41-99b5a3591e6b",
+      "name": "Build prompts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Prepare request').first().json.config.ollamaUrl }}/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 600000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 0
+            }
+          }
+        }
+      },
+      "id": "41c6fbf2-0620-4df6-9962-7d2641e89c94",
+      "name": "Evaluate rule (LLM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        260
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prompts = $('Build prompts').all().map(i => i.json);\nconst norm = s => String(s || '').toLowerCase().replace(/\\s+/g, ' ').trim();\n\nconst findings = $input.all().map((item, i) => {\n  const p = prompts[i];\n  const base = { ruleCode: p.ruleCode, rule: p.ruleText, severity: p.severity };\n\n  let r = null;\n  try { r = JSON.parse((item.json.message && item.json.message.content) || ''); } catch (e) { r = null; }\n  const statuses = ['pass', 'fail', 'unclear', 'not_applicable'];\n  if (!r || !statuses.includes(r.status)) {\n    return {\n      ...base, status: 'unclear', confidence: 0,\n      explanation: 'The model output could not be used; manual review needed.',\n      evidence: [], kbReferences: [],\n      checks: { parsed: false, notes: [item.json.error ? String(item.json.error.message || item.json.error) : 'Invalid JSON'] },\n    };\n  }\n\n  // Every quote must really exist in the chunk the model cited.\n  const byId = Object.fromEntries(p.evidence.map(e => [e.id, e]));\n  const evidence = (r.evidence || []).map(ev => {\n    const src = byId[ev.chunkId];\n    return {\n      chunkId: ev.chunkId,\n      document: src ? src.file : null,\n      page: src ? src.page : null,\n      quote: ev.quote,\n      verified: !!src && !!norm(ev.quote) && norm(src.text).includes(norm(ev.quote)),\n    };\n  });\n\n  const notes = [];\n  let status = r.status;\n  if ((status === 'pass' || status === 'fail') && !evidence.some(e => e.verified)) {\n    notes.push(`Model answered \"${status}\" but no quote could be verified in the submission; downgraded to \"unclear\".`);\n    status = 'unclear';\n  }\n\n  const kbById = Object.fromEntries(p.kb.map(k => [k.id, k]));\n  const kbReferences = (r.kbReferences || []).filter(id => kbById[id]).map(id => kbById[id]);\n\n  const confidence = Math.max(0, Math.min(1, Number(r.confidence) || 0));\n  return { ...base, status, confidence, explanation: r.explanation || '', evidence, kbReferences, checks: { parsed: true, notes } };\n});\n\nreturn [{ json: { findings } }];\n"
+      },
+      "id": "3c51dd55-75e1-4b09-b813-3bd40f4bc6da",
+      "name": "Validate findings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('Prepare request').first().json;\nconst documents = $('Prepare request').all().map(i => i.json.fileName);\nconst { findings } = $input.first().json;\n\nconst count = s => findings.filter(f => f.status === s).length;\nconst counts = {\n  pass: count('pass'), fail: count('fail'), unclear: count('unclear'),\n  not_applicable: count('not_applicable'), total: findings.length,\n};\n\nlet verdict = 'compliant';\nif (findings.some(f => f.status === 'fail' && ['critical', 'major'].includes(f.severity))) verdict = 'non_compliant';\nelse if (counts.fail || counts.unclear) verdict = 'needs_review';\n\nconst result = {\n  status: 'completed',\n  guidelineSet: req.setCode,\n  overall: { verdict, counts },\n  summary: `${counts.fail} of ${counts.total} rules failed; ${counts.unclear} unclear; ${counts.pass} passed.`,\n  findings,\n  trace: {\n    documents,\n    embedModel: req.config.embedModel,\n    llmModel: req.config.llmModel,\n    analyzedAt: new Date().toISOString(),\n  },\n};\n\nif (req.output !== 'text') {\n  return [{ json: { contentType: 'application/json', responseBody: JSON.stringify(result, null, 2) } }];\n}\n\nconst lines = [\n  `Analysis report - guideline set: ${req.setCode}`,\n  `Verdict: ${verdict.toUpperCase().replace('_', ' ')}`,\n  result.summary,\n  `Documents: ${documents.join(', ')}`,\n  '',\n];\nconst order = { fail: 0, unclear: 1, pass: 2, not_applicable: 3 };\nfor (const f of [...findings].sort((a, b) => order[a.status] - order[b.status])) {\n  lines.push(`[${f.status.toUpperCase()}] ${f.ruleCode} (${f.severity}) ${f.rule}`);\n  lines.push(`  Why: ${f.explanation}`);\n  for (const e of f.evidence) {\n    const loc = `${e.document || '?'}${e.page ? ', p.' + e.page : ''}`;\n    lines.push(`  Evidence: \"${e.quote}\" (${loc}${e.verified ? '' : ', NOT VERIFIED'})`);\n  }\n  for (const n of f.checks.notes || []) lines.push(`  Note: ${n}`);\n  lines.push('');\n}\nreturn [{ json: { contentType: 'text/plain; charset=utf-8', responseBody: lines.join('\\n') } }];\n"
+      },
+      "id": "9f1fa8ab-13fb-4408-a5ed-4448cacfcd7f",
+      "name": "Build report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.responseBody }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "={{ $json.contentType }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "ba19243c-8461-4561-8379-df0732e2fedb",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook /analyze": {
+      "main": [
+        [
+          {
+            "node": "Prepare request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare request": {
+      "main": [
+        [
+          {
+            "node": "Extract text (Tika)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract text (Tika)": {
+      "main": [
+        [
+          {
+            "node": "Split into chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split into chunks": {
+      "main": [
+        [
+          {
+            "node": "Embed submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed submission": {
+      "main": [
+        [
+          {
+            "node": "Load rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load rules": {
+      "main": [
+        [
+          {
+            "node": "Check rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check rules": {
+      "main": [
+        [
+          {
+            "node": "Embed rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed rules": {
+      "main": [
+        [
+          {
+            "node": "Select evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select evidence": {
+      "main": [
+        [
+          {
+            "node": "Search knowledge base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search knowledge base": {
+      "main": [
+        [
+          {
+            "node": "Build prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build prompts": {
+      "main": [
+        [
+          {
+            "node": "Evaluate rule (LLM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate rule (LLM)": {
+      "main": [
+        [
+          {
+            "node": "Validate findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate findings": {
+      "main": [
+        [
+          {
+            "node": "Build report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build report": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

@@ -1,0 +1,24 @@
+ILLUSTRATIVE GUIDANCE DOCUMENT (sample for prototype testing only)
+
+Section 3. Labelling of medicinal products
+
+3.1 Storage conditions
+The outer and immediate label must state the storage conditions. The statement must include
+a temperature limit or range, for example "Store below 30°C" or "Store between 2°C and 8°C".
+General phrases such as "store properly" or "store in a cool place" without a temperature
+are not acceptable.
+
+3.2 Shelf life and expiry
+The label must state the expiry date. The shelf life approved in the registration dossier
+must be consistent with the expiry date format shown on the proposed label.
+
+Section 4. Manufacturer information
+
+4.1 The dossier must state the name and full physical address of each manufacturing site.
+4.2 A Good Manufacturing Practice (GMP) certificate issued by a competent authority must be
+provided for each site. Certificates must be valid on the date the application is submitted.
+
+Section 5. Quality control
+
+5.1 At least one certificate of analysis for a production batch of the finished product
+must be provided. It must show the batch number, specifications and test results.

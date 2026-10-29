@@ -1,0 +1,212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  applicant
+  assessor
+}
+
+enum ProductType {
+  HM
+  VM
+  PF
+  CO
+  MD
+}
+
+enum AppStatus {
+  draft
+  awaiting_payment
+  in_review
+  queried
+  approved
+  rejected
+}
+
+enum Stage {
+  draft
+  payment
+  verification
+  screening
+  assessment
+  approval
+  decision
+}
+
+enum InvoiceStatus {
+  unpaid
+  proof_uploaded
+  verified
+  rejected
+}
+
+enum Party {
+  applicant
+  fda
+}
+
+model User {
+  id           String        @id @default(uuid())
+  role         Role
+  email        String        @unique
+  passwordHash String
+  name         String
+  customerNo   String?       @unique
+  accountType  String?
+  tin          String?
+  phone        String?
+  address      String?
+  createdAt    DateTime      @default(now())
+  applications Application[]
+  files        StoredFile[]
+}
+
+model Application {
+  id               String         @id @default(uuid())
+  ref              String         @unique
+  isDraft          Boolean        @default(true)
+  ownerId          String
+  owner            User           @relation(fields: [ownerId], references: [id])
+  applicant        String
+  applicantAddress String         @default("")
+  type             ProductType
+  category         String         @default("")
+  submissionType   String         @default("Single product")
+  brand            String         @default("")
+  generic          String         @default("")
+  form             String         @default("")
+  size             String         @default("")
+  intendedUse      String         @default("")
+  intendedUsers    String         @default("")
+  storage          String         @default("")
+  shelfLife        String         @default("")
+  description      String         @default("")
+  warnings         String         @default("")
+  mfrName          String         @default("")
+  mfrCountry       String         @default("")
+  mfrAddress       String         @default("")
+  origin           String         @default("")
+  srA              String         @default("No")
+  refAuthority     String         @default("")
+  ltr              String         @default("")
+  trademarkDiffers Boolean        @default(false)
+  labelText        String         @default("")
+  labelLanguages   String[]       @default(["English"])
+  status           AppStatus      @default(draft)
+  stage            Stage          @default(draft)
+  stageAt          DateTime       @default(now())
+  step             Int            @default(0)
+  queriedAt        DateTime?
+  submittedAt      DateTime?
+  decidedAt        DateTime?
+  certNo           String?        @unique
+  expiresAt        DateTime?
+  recommendation   String?
+  urgent           Boolean        @default(false)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  files            StoredFile[]
+  invoice          Invoice?
+  queries          Query[]
+  history          HistoryEvent[]
+  checks           DocumentCheck[]
+
+  @@index([ownerId])
+  @@index([status, stage])
+}
+
+/// Every uploaded file: dossier documents, label artwork, proof of payment, query attachments.
+model StoredFile {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  requirementId String
+  queryId       String?
+  query         Query?      @relation(fields: [queryId], references: [id], onDelete: Cascade)
+  originalName  String
+  storedName    String      @unique
+  mimeType      String
+  size          Int
+  uploadedById  String
+  uploadedBy    User        @relation(fields: [uploadedById], references: [id])
+  createdAt     DateTime    @default(now())
+  invoiceProof  Invoice?    @relation("InvoiceProof")
+
+  @@index([applicationId, requirementId])
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  applicationId String        @unique
+  application   Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  no            String        @unique
+  amount        Int
+  status        InvoiceStatus @default(unpaid)
+  issuedAt      DateTime      @default(now())
+  proofId       String?       @unique
+  proof         StoredFile?   @relation("InvoiceProof", fields: [proofId], references: [id], onDelete: SetNull)
+  momoRef       String?
+}
+
+model Query {
+  id            String       @id @default(uuid())
+  applicationId String
+  application   Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  from          Party
+  stage         Stage
+  text          String
+  answered      Boolean      @default(false)
+  authorId      String?
+  createdAt     DateTime     @default(now())
+  files         StoredFile[]
+
+  @@index([applicationId])
+}
+
+model HistoryEvent {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  at            DateTime    @default(now())
+  by            Party
+  actorId       String?
+  action        String
+  note          String      @default("")
+  stage         Stage
+
+  @@index([applicationId, at])
+}
+
+/// Screening checklist: a requirement the screening officer has checked.
+model DocumentCheck {
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  requirementId String
+  checkedById   String
+  checkedAt     DateTime    @default(now())
+
+  @@id([applicationId, requirementId])
+}
+
+/// Sequences for tracking numbers, invoices, drafts, certificates and customer numbers.
+model Counter {
+  key   String @id
+  value Int
+}
+
+model HelpdeskTicket {
+  id        String   @id @default(uuid())
+  no        String   @unique
+  topic     String
+  ref       String?
+  message   String
+  userId    String?
+  email     String?
+  createdAt DateTime @default(now())
+}

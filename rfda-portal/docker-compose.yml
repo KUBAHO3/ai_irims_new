@@ -1,0 +1,16 @@
+# Postgres for the portal. Ports differ from the n8n prototype stack (5433) so both can run.
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rfda
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: rfda_portal
+    volumes:
+      - rfda_pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5440:5432"
+
+volumes:
+  rfda_pgdata:

@@ -46,8 +46,8 @@ function Frame({ me, children }: { me: UserDto; children: ReactNode }) {
     ? [['/dashboard', 'home', 'Dashboard', actionCount], ['/applications', 'list', 'My applications'], ['/applications/new', 'plus', 'Start an application'], ['/payments', 'card', 'Invoices and payments'], ['/help', 'help', 'Help']]
     : [['/intray', 'inbox', 'In-tray', -1], ['/enquiries', 'search', 'Application enquiries'], ['/help', 'help', 'Help']];
   const active = (href: string) => {
-    if (href === '/applications/new') return pathname === href || pathname.endsWith('/edit');
-    if (href === '/applications') return pathname.startsWith('/applications') && pathname !== '/applications/new' && !pathname.endsWith('/edit');
+    if (href === '/applications/new') return pathname === href;
+    if (href === '/applications') return pathname.startsWith('/applications') && pathname !== '/applications/new';
     if (href === '/intray') return pathname.startsWith('/intray') || pathname.startsWith('/review');
     return pathname === href;
   };

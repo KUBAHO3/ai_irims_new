@@ -38,6 +38,8 @@ Open http://localhost:3100. With `NEXT_PUBLIC_DEMO_LOGIN=true` (set in `apps/web
 **Assessor:** in-tray sorted by stage deadline (SLA), enquiries across all applications, and a review workspace with stage-specific decisions:
 verification (confirm payment) → screening (persisted document checklist, accept or query) → assessment (findings, recommend, query) → approval (approve and issue certificate, return, reject).
 
+**Changing a submitted application:** the applicant can change it while it is with them (awaiting payment, or answering a query) via *Change application*. It is locked while Rwanda FDA is working on it. Changes are saved explicitly, not autosaved; each save must keep the details complete and is recorded in History ("Details changed", "Documents changed"). A changed document loses its screening tick, the last file of a required document can only be replaced, not removed, and the dossier must be complete before the applicant can pay or send a query response. Assessors see a "Changed by applicant" flag in the in-tray and a list of the changes in the review workspace. The product type can't be changed (the invoice depends on it).
+
 The API enforces every rule the UI shows: completeness on submit, allowed decisions per stage, required comments, that every uploaded document is ticked before acceptance, ownership of applications and files.
 
 ## Document requirements

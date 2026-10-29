@@ -21,6 +21,8 @@ export default function HelpPage() {
         <h2>The journey of an application</h2>
         <ol className="timeline" style={{ marginTop: 12 }}>{JOURNEY.map(([t, d], i) => <li key={t} className={i > 1 && i < 6 ? 'fda' : ''}><strong>{t}</strong><div className="muted">{d}</div></li>)}</ol>
         <p>The coloured marker on each application shows who has it: <span className="badge you">With you</span> means you need to act; <span className="badge fda">With Rwanda FDA</span> means you can wait.</p>
+        <h2>Changing an application after you submit it</h2>
+        <p className="muted">You can change a submitted application while it is with you: before you pay the invoice, and when Rwanda FDA sends you a query. Use <strong>Change application</strong> on the application page. Each saved change is recorded in the history and shown to Rwanda FDA, and changed documents are checked again. While Rwanda FDA is working on the application it is locked; if something needs correcting, raise it with the help desk.</p>
         <h2>Human medicines: dossier documents</h2>
         <p className="muted">Human medicine applications are submitted in Common Technical Document (CTD) format: Modules 1 to 5, each of which can be uploaded as several files, plus any other supporting documents. If the product is already registered by a reference regulatory authority, the reliance pathway also needs a declaration of sameness, the GMP certificate issued by that authority, and a letter of authorization allowing it to share information with Rwanda FDA.</p>
         <div><button className="btn primary" onClick={() => openModal((close) => <HelpdeskModal close={close} />)}>Raise an issue with the help desk</button></div>

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, useState } from 'react';
 import { api, errMsg } from '@/lib/api';
 import { HelpdeskModal } from './modals';
+import { ThemeToggle } from './ThemeToggle';
 import { useModal, useToast } from './ui';
 
 const DEMO_LOGIN = process.env.NEXT_PUBLIC_DEMO_LOGIN === 'true';
@@ -18,6 +19,7 @@ export function PublicHeader() {
     <header className="public-top"><div className="inner">
       <Link className="brand" href="/"><span className="logo"><img src="/logo.png" alt="" /></span><span><strong>Rwanda FDA</strong><span>Regulatory services portal</span></span></Link>
       <span className="spacer" />
+      <ThemeToggle />
       <button className="btn link" onClick={() => openModal((close) => <HelpdeskModal close={close} />)}>Help desk</button>
       <Link className="btn" href="/signin">Sign in</Link>
     </div></header>

@@ -8,6 +8,7 @@ import { api, ApiError, fetcher } from '@/lib/api';
 import { Icon } from './Icon';
 import { HelpdeskModal } from './modals';
 import { SessionCtx, useAllApps } from './session';
+import { ThemeToggle } from './ThemeToggle';
 import { useModal, useToast } from './ui';
 
 const APPLICANT_PATHS = ['/dashboard', '/applications', '/payments'];
@@ -75,6 +76,7 @@ function Frame({ me, children }: { me: UserDto; children: ReactNode }) {
         <header className="topbar">
           <button className="btn small menu-btn" aria-label="Open navigation" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}><Icon name="menu" /></button>
           <span className="spacer" />
+          <ThemeToggle />
           <button className="btn small" aria-label="Help desk" onClick={() => openModal((close) => <HelpdeskModal close={close} />)}><Icon name="help" /><span className="lbl">Help desk</span></button>
           <div className="whoami">{isA ? <><strong>{me.name}</strong>Customer {me.customerNo}</> : <><strong>{me.name}</strong>Product assessment</>}</div>
           <button className="btn small" aria-label="Sign out" onClick={signOut}><Icon name="out" /><span className="lbl">Sign out</span></button>

@@ -13,8 +13,6 @@ POST /webhook/analyze (text, fields, files)
   -> aggregate verdict -> JSON or text response
 ```
 
-Everything runs locally; no data leaves the server.
-
 ## Files
 
 | Path | Purpose |
@@ -39,26 +37,6 @@ docker compose exec ollama ollama pull qwen2.5:7b
 The schema and sample rules are created automatically on the first start of Postgres.
 If you change `init/01-schema.sql` later, either run it manually with psql or
 `docker compose down -v` (this deletes all data) and start again.
-
-## 2. Set up n8n
-
-1. Open http://localhost:5678 and create the owner account.
-2. **Credentials -> Add credential -> Postgres**: host `postgres`, port `5432`,
-   database `aipoc`, user `aipoc`, password `change-me`. Save it.
-3. **Workflows -> Import from file**: import both files from `workflows/`.
-4. In each workflow, open every **Postgres** node (red warning icon) and select the credential.
-5. Save, then activate/publish each workflow (toggle at the top right).
-
-## 3. Load the knowledge base
-
-```bash
-curl -X POST http://localhost:5678/webhook/kb-ingest \
-  -F source="Labelling guidance (sample)" \
-  -F file1=@samples/kb-labelling-guidance.txt
-```
-
-Response: `{"status":"ok","sources":["Labelling guidance (sample)"],"deleted":0,"inserted":2}`.
-Sending the same `source` again replaces its old chunks. PDF and DOCX work the same way.
 
 ## 4. Analyze a submission
 
@@ -88,47 +66,6 @@ and passes for the product description and the certificate of analysis. Exact re
 
 Use distinct multipart field names for several files (`file1`, `file2`, ...).
 
-## 5. Response shape (JSON)
-
-```json
-{
-  "status": "completed",
-  "guidelineSet": "product-registration",
-  "overall": { "verdict": "non_compliant", "counts": { "pass": 2, "fail": 2, "unclear": 2, "not_applicable": 0, "total": 6 } },
-  "summary": "2 of 6 rules failed; 2 unclear; 2 passed.",
-  "findings": [
-    {
-      "ruleCode": "LBL-001",
-      "rule": "The proposed label states the storage conditions, including a temperature range.",
-      "severity": "major",
-      "status": "fail",
-      "confidence": 0.85,
-      "explanation": "The label says 'Store in a cool, dry place' with no temperature.",
-      "evidence": [{ "chunkId": "S2", "document": "submission-dossier.txt", "page": null,
-                     "quote": "Store in a cool, dry place.", "verified": true }],
-      "kbReferences": [{ "id": "K1", "source": "Labelling guidance (sample)", "page": null }],
-      "checks": { "parsed": true, "notes": [] }
-    }
-  ],
-  "trace": { "documents": ["submission-dossier.txt"], "embedModel": "bge-m3", "llmModel": "qwen2.5:7b", "analyzedAt": "..." }
-}
-```
-
-Verdict logic: any `fail` on a critical/major rule -> `non_compliant`; otherwise any `fail` or
-`unclear` -> `needs_review`; otherwise `compliant`.
-
-## Adding your own rules
-
-```sql
-INSERT INTO guideline_rules (set_code, rule_code, rule_text, severity, guidance)
-VALUES ('product-registration', 'LBL-003', 'Rule text...', 'major', 'Optional reviewer guidance');
--- deactivate instead of deleting, to keep history:
-UPDATE guideline_rules SET active = false WHERE set_code = 'product-registration' AND rule_code = 'LBL-003';
-```
-
-Write each rule as one checkable statement. Split compound rules: one evaluation per rule
-works much better than asking the model to check five things at once.
-
 ## Settings
 
 Model names, Ollama URL, top-k and chunk size are in the `CONFIG` block at the top of the
@@ -149,10 +86,3 @@ model, change `vector(1024)` in the schema to its dimension and re-ingest the kn
 - **Many "unclear" results**: inspect the **Select evidence** node output to see whether the right
   chunks are being retrieved; increase `topKEvidence` or reduce `chunkSize`.
 
-## Prototype limits (address these in the NestJS version)
-
-- Synchronous HTTP; real system should return `202` + job ID and process in a queue.
-- No authentication on the webhooks: keep n8n on an internal network or add Header Auth to
-  the Webhook nodes before exposing it.
-- Results are not stored; add a table for analyses (inputs, rule versions, prompts, outputs) for audit.
-- Submission embeddings live only in memory for the run, which keeps submissions out of the knowledge base.
